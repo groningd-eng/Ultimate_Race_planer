@@ -1,0 +1,1365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Race Strategy Calculator</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- Tailwind & React -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- XLSX export -->
+  <script src="https://unpkg.com/xlsx-populate/browser/xlsx-populate.min.js"></script>
+
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Inter", sans-serif;
+    }
+    input:focus, select:focus {
+      box-shadow: 0 0 0 2px rgba(16,185,129,0.7);
+      outline: none;
+    }
+    /* Make dropdown options clearly visible */
+    select {
+      background-color: #ffffff;
+      color: #000000;
+    }
+    select option {
+      color: #000000 !important;
+      background-color: #ffffff !important;
+    }
+    select:disabled {
+      background-color: #e5e7eb !important; /* gray-200 */
+      color: #4b5563 !important;            /* gray-600 */
+      cursor: not-allowed;
+    }
+    select:disabled option {
+      color: #4b5563 !important;
+      background-color: #e5e7eb !important;
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState } = React;
+
+    function StrategyCalculator() {
+      // --- Core race & pace inputs ---
+      const [veTotal, setVeTotal] = useState(100);
+      const [vePerLap, setVePerLap] = useState(4.5);
+      const [lapTimeStr, setLapTimeStr] = useState("4:00.000");
+      const [lapTimeSec, setLapTimeSec] = useState(240);
+
+      const [totalRaceDurationStr, setTotalRaceDurationStr] = useState("24:00:00");
+      const [totalRaceDurationSec, setTotalRaceDurationSec] = useState(24 * 3600);
+
+      // Pit & penalties
+      const [stopBoxTime, setStopBoxTime] = useState(35);   // base pit stop (no fuel/tyres)
+      const [tyreChangeTime, setTyreChangeTime] = useState(18);
+      const [fuelTimePerPercent, setFuelTimePerPercent] = useState(0.26);
+
+      const [inLapPenaltySec, setInLapPenaltySec] = useState(1.5);
+      const [outLapPenaltySec, setOutLapPenaltySec] = useState(2.0);
+      const [warmupPenaltySec, setWarmupPenaltySec] = useState(3.0);
+
+      const [startLoss, setStartLoss] = useState(5.0);
+      const [firstLapPenaltySec, setFirstLapPenaltySec] = useState(2.0);
+
+      // Tyre & VE
+      const [safetyBuffer, setSafetyBuffer] = useState(0.5);
+      const [tyreDeg, setTyreDeg] = useState(0.02);
+
+      // Plan pace offsets
+      const [pacePenaltyB, setPacePenaltyB] = useState(0.2);
+      const [pacePenaltyC, setPacePenaltyC] = useState(0.4);
+
+      // Plan selection
+      const [outlinePlan, setOutlinePlan] = useState("A");
+
+      // Driver & tyre per stint (user input maps)
+      const [driverNames, setDriverNames] = useState({});
+      const [stintTyreChangeMap, setStintTyreChangeMap] = useState({});
+      const [tyreCompoundMap, setTyreCompoundMap] = useState({});
+
+      // Tyre compound deltas
+      const [tyreDeltas, setTyreDeltas] = useState({
+        Soft: -0.8,
+        Medium: 0.0,
+        Hard: 0.5,
+        Wet: 10.0
+      });
+
+      // Start times
+      const [gameStartTime, setGameStartTime] = useState("12:00");
+      const [estStartTime, setEstStartTime] = useState("14:00");
+
+      const fixedPitBase = stopBoxTime;
+
+      // --- Helpers ---
+      const parseTimeInput = (input) => {
+        if (!input) return 0;
+        const parts = input.split(":").map(Number);
+        if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+        if (parts.length === 2) return parts[0] * 60 + parts[1];
+        return parts[0];
+      };
+
+      const formatTime = (seconds) => {
+        if (isNaN(seconds) || seconds < 0) return "0:00.000";
+        const total = +seconds;
+        const m = Math.floor(total / 60);
+        const s = (total % 60).toFixed(3);
+        return `${m}:${s.padStart(6, "0")}`;
+      };
+
+      const formatTimeToHMS = (seconds) => {
+        if (isNaN(seconds) || seconds < 0) return "0:00:00.000";
+        const total = +seconds;
+        const h = Math.floor(total / 3600);
+        const m = Math.floor((total % 3600) / 60);
+        const s = (total % 60).toFixed(3);
+        return `${h}:${String(m).padStart(2, "0")}:${s.padStart(6, "0")}`;
+      };
+
+      const avgDegWithTyreAge = (stintLaps, degPerLap, ageStart) => {
+        if (stintLaps <= 0 || degPerLap <= 0) return 0;
+        return degPerLap * (2 * ageStart + (stintLaps - 1)) / 2;
+      };
+
+      const timeToMinutes = (t) => {
+        if (!t) return 0;
+        const parts = t.split(":").map(Number);
+        const h = parts[0] || 0;
+        const m = parts[1] || 0;
+        return h * 60 + m;
+      };
+
+      const minutesToTime = (mins) => {
+        const wrapped = ((mins % 1440) + 1440) % 1440;
+        const hh = String(Math.floor(wrapped / 60)).padStart(2, "0");
+        const mm = String(wrapped % 60).padStart(2, "0");
+        return `${hh}:${mm}`;
+      };
+
+      const handleLapTimeChange = (e) => {
+        const val = e.target.value;
+        setLapTimeStr(val);
+        const parsed = parseTimeInput(val);
+        if (!isNaN(parsed)) setLapTimeSec(parsed);
+      };
+
+      const handleRaceTimeChange = (e) => {
+        const val = e.target.value;
+        setTotalRaceDurationStr(val);
+        const parsed = parseTimeInput(val);
+        if (!isNaN(parsed)) setTotalRaceDurationSec(parsed);
+      };
+
+      // --- Plan configs based on VE and buffer ---
+      const baseLapTime = lapTimeSec;
+      const veAvailableForDriving = veTotal - safetyBuffer;
+
+      const planA_laps = Math.max(1, Math.floor(veAvailableForDriving / vePerLap));
+      const planA_veTarget = veAvailableForDriving / planA_laps;
+      const planA_avgDeg = avgDegWithTyreAge(planA_laps, tyreDeg, 0);
+      const planA_adjLapTime = baseLapTime + planA_avgDeg;
+
+      const planB_laps = planA_laps + 1;
+      const planB_veTarget = veAvailableForDriving / planB_laps;
+      const planB_avgDeg = avgDegWithTyreAge(planB_laps, tyreDeg, 0);
+      const planB_adjLapTime = baseLapTime + planB_avgDeg + pacePenaltyB;
+
+      const planC_laps = planA_laps + 2;
+      const planC_veTarget = veAvailableForDriving / planC_laps;
+      const planC_avgDeg = avgDegWithTyreAge(planC_laps, tyreDeg, 0);
+      const planC_adjLapTime = baseLapTime + planC_avgDeg + pacePenaltyC;
+
+      const veLeftA = veTotal - planA_laps * planA_veTarget;
+      const veLeftB = veTotal - planB_laps * planB_veTarget;
+      const veLeftC = veTotal - planC_laps * planC_veTarget;
+
+      const getPlanConfig = (code) => {
+        if (code === "A") return { lapsPerStint: planA_laps, veTargetBase: planA_veTarget, pacePenalty: 0 };
+        if (code === "B") return { lapsPerStint: planB_laps, veTargetBase: planB_veTarget, pacePenalty: pacePenaltyB };
+        return { lapsPerStint: planC_laps, veTargetBase: planC_veTarget, pacePenalty: pacePenaltyC };
+      };
+
+      // --- Build stint outline, including blockSeconds for race clock ---
+      const buildPlanOutline = (planCode) => {
+        const cfg = getPlanConfig(planCode);
+        if (!cfg || !cfg.lapsPerStint || cfg.lapsPerStint <= 0) return [];
+
+        const lapsStd = cfg.lapsPerStint;
+        const veTargetBase = cfg.veTargetBase;
+        const pacePenaltyPlan = cfg.pacePenalty;
+
+        const rows = [];
+        let timeUsed = 0;
+        let stintIndex = 1;
+        let tyreSet = 1;
+        let tyreAge = 0;
+
+        const maxStints = 200;
+        const minLapTime = Math.max(1, baseLapTime);
+
+        const getTyreChangeFlag = (planCode, index) => {
+          const key = `${planCode}-${index}`;
+          const override = stintTyreChangeMap[key];
+          const defaultFlag = index === 1 ? false : true;
+          return override !== undefined ? override : defaultFlag;
+        };
+
+        const getCompoundForStint = (planCode, index) => {
+          const key = `${planCode}-${index}`;
+          const saved = tyreCompoundMap[key];
+          return saved !== undefined ? saved : "Medium";
+        };
+
+        // Standard stints (all but final)
+        while (stintIndex <= maxStints) {
+          const tyreChangeThis = getTyreChangeFlag(planCode, stintIndex);
+          const compound = getCompoundForStint(planCode, stintIndex);
+          const compoundDelta = tyreDeltas[compound] ?? 0;
+
+          const ageStart = (stintIndex === 1 || !tyreChangeThis) ? tyreAge : 0;
+          const laps = lapsStd;
+          const avgDegPenalty = avgDegWithTyreAge(laps, tyreDeg, ageStart);
+          const lapTimeTarget = baseLapTime + pacePenaltyPlan + avgDegPenalty + compoundDelta;
+          const veTarget = veTargetBase;
+          const veUsed = laps * veTarget;
+
+          let pitTime = 0;
+          let startExtra = 0;
+          let outPenalty = 0;
+          let inPenalty = inLapPenaltySec;
+
+          if (stintIndex === 1) {
+            pitTime = 0;
+            startExtra = startLoss + firstLapPenaltySec;
+            outPenalty = 0;
+          } else {
+            const fuelTime = veUsed * fuelTimePerPercent;
+            pitTime = stopBoxTime + fuelTime + (tyreChangeThis ? tyreChangeTime : 0);
+            outPenalty = outLapPenaltySec + (tyreChangeThis ? warmupPenaltySec : 0);
+          }
+
+          const driveTime = laps * lapTimeTarget;
+          const blockTimeCandidate =
+            pitTime + startExtra + outPenalty + driveTime + inPenalty;
+
+          if (timeUsed + blockTimeCandidate + minLapTime <= totalRaceDurationSec) {
+            if (stintIndex === 1) {
+              tyreSet = tyreChangeThis ? 2 : 1;
+            } else if (tyreChangeThis) {
+              tyreSet += 1;
+            }
+
+            const newTyreAge = (stintIndex === 1 || !tyreChangeThis ? tyreAge : 0) + laps;
+            tyreAge = newTyreAge;
+
+            rows.push({
+              stintIndex,
+              label: `${stintIndex}`,
+              laps,
+              lapTimeTarget,
+              veTarget,
+              veUsed,
+              pitTime,
+              tyreChange: tyreChangeThis ? "Yes" : "No",
+              tyreSet,
+              compound,
+              blockSeconds: blockTimeCandidate,
+              driveSeconds: driveTime,
+              outPenaltySeconds: outPenalty
+            });
+
+            timeUsed += blockTimeCandidate;
+            stintIndex += 1;
+          } else {
+            break;
+          }
+        }
+
+        // Final stint
+        let remaining = totalRaceDurationSec - timeUsed;
+        if (remaining <= minLapTime * 0.5) {
+          if (rows.length > 0) {
+            rows[rows.length - 1].label = `Last (${rows[rows.length - 1].stintIndex})`;
+          }
+          return rows;
+        }
+
+        const finalIndex = stintIndex;
+        const tyreChangeFinal = getTyreChangeFlag(planCode, finalIndex);
+        const finalCompound = getCompoundForStint(planCode, finalIndex);
+        const finalCompoundDelta = tyreDeltas[finalCompound] ?? 0;
+
+        let finalTyreSet = tyreSet;
+        if (finalIndex === 1) {
+          finalTyreSet = tyreChangeFinal ? 2 : 1;
+        } else if (tyreChangeFinal) {
+          finalTyreSet += 1;
+        }
+
+        let ageStartFinal;
+        if (finalIndex === 1) {
+          ageStartFinal = 0;
+        } else {
+          ageStartFinal = tyreChangeFinal ? 0 : tyreAge;
+        }
+
+        let bestLaps = 0;
+        let bestLapTimeTarget = baseLapTime + pacePenaltyPlan + finalCompoundDelta;
+        let bestVeUsed = 0;
+        let bestPitTime = 0;
+        let bestBlockTime = 0;
+        let bestDriveTime = 0;
+        let bestOutPenalty = 0;
+
+        const maxSearchLaps = lapsStd + 50;
+
+        for (let laps = 1; laps <= maxSearchLaps; laps++) {
+          const avgDegPenalty = avgDegWithTyreAge(laps, tyreDeg, ageStartFinal);
+          const lapTimeTarget = baseLapTime + pacePenaltyPlan + avgDegPenalty + finalCompoundDelta;
+          const veTarget = veTargetBase;
+          const veUsed = laps * veTarget;
+
+          let pitTime = 0;
+          let startExtra = 0;
+          let outPenalty = 0;
+          let inPenalty = 0;
+
+          // Final stint: still show pit time (your requirement)
+          const fuelTime = veUsed * fuelTimePerPercent;
+          pitTime = stopBoxTime + fuelTime + (tyreChangeFinal ? tyreChangeTime : 0);
+          if (finalIndex === 1) {
+            startExtra = startLoss + firstLapPenaltySec;
+            outPenalty = 0;
+          } else {
+            outPenalty = outLapPenaltySec + (tyreChangeFinal ? warmupPenaltySec : 0);
+          }
+
+          const driveTime = laps * lapTimeTarget;
+          const blockTime = pitTime + startExtra + outPenalty + driveTime + inPenalty;
+
+          if (blockTime <= remaining + 1e-6) {
+            bestLaps = laps;
+            bestLapTimeTarget = lapTimeTarget;
+            bestVeUsed = veUsed;
+            bestPitTime = pitTime;
+            bestBlockTime = blockTime;
+            bestDriveTime = driveTime;
+            bestOutPenalty = outPenalty;
+          } else {
+            break;
+          }
+        }
+
+        if (bestLaps > 0) {
+          rows.push({
+            stintIndex: finalIndex,
+            label: `Last (${finalIndex})`,
+            laps: bestLaps,
+            lapTimeTarget: bestLapTimeTarget,
+            veTarget: veTargetBase,
+            veUsed: bestVeUsed,
+            pitTime: bestPitTime,
+            tyreChange: tyreChangeFinal ? "Yes" : "No",
+            tyreSet: finalTyreSet,
+            compound: finalCompound,
+            blockSeconds: bestBlockTime,
+            driveSeconds: bestDriveTime,
+            outPenaltySeconds: bestOutPenalty
+          });
+        } else if (rows.length > 0) {
+          rows[rows.length - 1].label = `Last (${rows[rows.length - 1].stintIndex})`;
+        }
+
+        return rows;
+      };
+
+      // --- Stats from outline ---
+      const getStatsFromOutline = (planCode) => {
+        const rows = buildPlanOutline(planCode);
+        if (!rows.length) {
+          return {
+            totalLaps: 0,
+            totalVeUsed: 0,
+            avgVePerLap: 0,
+            totalStints: 0,
+            totalTime: 0,
+            openingStintTime: 0,
+            midStintTime: 0
+          };
+        }
+
+        const totalLaps = rows.reduce((s, r) => s + r.laps, 0);
+        const totalVeUsed = rows.reduce((s, r) => s + r.veUsed, 0);
+        const totalTime = rows.reduce((s, r) => s + (r.blockSeconds || 0), 0);
+        const openingStintTime = rows[0].blockSeconds || 0;
+        const totalStints = rows.length;
+        const midStintTime =
+          totalStints > 1
+            ? (totalTime - openingStintTime) / (totalStints - 1)
+            : openingStintTime;
+
+        return {
+          totalLaps,
+          totalVeUsed,
+          avgVePerLap: totalLaps > 0 ? totalVeUsed / totalLaps : 0,
+          totalStints,
+          totalTime,
+          openingStintTime,
+          midStintTime
+        };
+      };
+
+      const statsA = getStatsFromOutline("A");
+      const statsB = getStatsFromOutline("B");
+      const statsC = getStatsFromOutline("C");
+
+      // --- UI handlers ---
+      const toggleTyreChange = (planCode, stintIndex, currentLabel) => {
+        const key = `${planCode}-${stintIndex}`;
+        setStintTyreChangeMap((prev) => ({
+          ...prev,
+          [key]: currentLabel === "Yes" ? false : true
+        }));
+      };
+
+      const handleDriverNameChange = (planCode, stintIndex, value) => {
+        const key = `${planCode}-${stintIndex}`;
+        setDriverNames((prev) => ({ ...prev, [key]: value }));
+      };
+
+      const handleCompoundChange = (planCode, stintIndex, value) => {
+        const key = `${planCode}-${stintIndex}`;
+        setTyreCompoundMap((prev) => ({ ...prev, [key]: value }));
+      };
+
+      const applyTyrePattern = (step) => {
+        const rows = buildPlanOutline(outlinePlan);
+        setStintTyreChangeMap((prev) => {
+          const newMap = { ...prev };
+          rows.forEach((row) => {
+            const key = `${outlinePlan}-${row.stintIndex}`;
+            newMap[key] = row.stintIndex % step === 0;
+          });
+          return newMap;
+        });
+      };
+
+      // Safe helper to avoid undefined/NaN into XLSX
+      const safe = (v, fallback = "") => {
+        if (v === undefined || v === null) return fallback;
+        if (typeof v === "number" && Number.isNaN(v)) return fallback;
+        return v;
+      };
+
+      // --- XLSX Export with colors ---
+      const exportOutlineToXLSX = () => {
+        const rows = buildPlanOutline(outlinePlan);
+        if (!rows.length || !window.XlsxPopulate) return;
+
+        XlsxPopulate.fromBlank().then(workbook => {
+          const sheet = workbook.sheet(0);
+          sheet.name("Stints");
+
+          const header = [
+            "Stint #",
+            "Total Laps",
+            "Lap Time",
+            "VE Target (%/lap)",
+            "VE Used (%)",
+            "Pit Time (s)",
+            "Tyre Change",
+            "Tyre Set #",
+            "Tyre Comp",
+            "Driver",
+            "Stint Length (min)",
+            "Game Start",
+            "EST Start (UTC Start)",
+            "Driver A",
+            "Driver B",
+            "Driver C",
+            "Driver D",
+            "Available",
+            "Maybe",
+            "Unavailable"
+          ];
+
+          // Header row
+          header.forEach((val, idx) => {
+            const cell = sheet.cell(1, idx + 1);
+            cell.value(val);
+            cell.style({
+              bold: true,
+              fill: "000000",
+              fontColor: "FFFFFF",
+              horizontalAlignment: "center",
+              verticalAlignment: "center"
+            });
+          });
+
+          // Quali row
+          sheet.cell(2, 1).value("Quali");
+
+          // Column widths
+          const colWidths = [
+            8, 10, 12, 14, 14, 12, 12, 10, 10, 12,
+            16, 12, 18, 10, 10, 10, 10, 12, 10, 14
+          ];
+          colWidths.forEach((w, i) => {
+            sheet.column(i + 1).width(w);
+          });
+
+          // Header colors for drivers & availability
+          sheet.cell(1, 14).style("fill", "4F81BD"); // Driver A
+          sheet.cell(1, 15).style("fill", "F79646"); // Driver B
+          sheet.cell(1, 16).style("fill", "9BBB59"); // Driver C
+          sheet.cell(1, 17).style("fill", "8064A2"); // Driver D
+          sheet.cell(1, 18).style("fill", "00B050"); // Available
+          sheet.cell(1, 19).style("fill", "FFFF00"); // Maybe
+          sheet.cell(1, 20).style("fill", "FF0000"); // Unavailable
+
+          // Start times
+          let gameMinutes = timeToMinutes(gameStartTime);
+          let estMinutes  = timeToMinutes(estStartTime);
+
+          rows.forEach((row, index) => {
+            const excelRow = index + 3; // data from row 3
+            const key = `${outlinePlan}-${row.stintIndex}`;
+            const savedDriver = driverNames[key] || "";
+
+            let savedCompound = tyreCompoundMap[key];
+            let compound = savedCompound !== undefined ? savedCompound : row.compound;
+            if (!compound) compound = "Medium";
+
+            const lapTimeText = formatTime(row.lapTimeTarget);
+            const veTargetText = safe(row.veTarget, 0).toFixed(2);
+            const veUsedText = safe(row.veUsed, 0).toFixed(2);
+            const pitTimeText = safe(row.pitTime, 0).toFixed(2);
+            const stintLengthMin = safe(
+              ((row.driveSeconds || 0) + (row.outPenaltySeconds || 0)) / 60,
+              0
+            ).toFixed(1);
+
+            const gameStartOut = minutesToTime(Math.round(gameMinutes));
+            const estStartOut  = minutesToTime(Math.round(estMinutes));
+
+            const rowValues = [
+              row.label,
+              row.laps,
+              lapTimeText,
+              veTargetText,
+              veUsedText,
+              pitTimeText,
+              row.tyreChange,
+              row.tyreSet,
+              compound,
+              savedDriver,
+              stintLengthMin,
+              gameStartOut,
+              estStartOut,
+              "", "", "", "", // Driver A–D
+              "", "", ""      // Availability
+            ];
+
+            rowValues.forEach((val, cidx) => {
+              sheet.cell(excelRow, cidx + 1).value(safe(val, ""));
+            });
+
+            // Tyre Change color (cell always has a string, so styling is safe)
+            const tyreChangeCell = sheet.cell(excelRow, 7);
+            if (row.tyreChange === "Yes") {
+              tyreChangeCell.style("fill", "00B050");
+            } else {
+              tyreChangeCell.style("fill", "FF0000");
+            }
+
+            // Tyre Compound color
+            const compCell = sheet.cell(excelRow, 9);
+            if (compound === "Soft") compCell.style("fill", "FF0000");
+            else if (compound === "Medium") compCell.style("fill", "FFFF00");
+            else if (compound === "Hard") compCell.style("fill", "808080");
+            else if (compound === "Wet") compCell.style("fill", "0070C0");
+
+            // Advance race clocks including pits (blockSeconds)
+            const blockMinutes = (row.blockSeconds || 0) / 60;
+            gameMinutes += blockMinutes;
+            estMinutes  += blockMinutes;
+          });
+
+          workbook.outputAsync().then(blob => {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `Raceplan_${outlinePlan}.xlsx`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+          });
+        });
+      };
+
+      const outlineRows = buildPlanOutline(outlinePlan);
+
+      const compoundColors = {
+        Soft: "bg-red-500 text-black",
+        Medium: "bg-yellow-300 text-black",
+        Hard: "bg-gray-300 text-black",
+        Wet: "bg-blue-300 text-black"
+      };
+
+      // --- Dashboard layout ---
+      return (
+        <div className="min-h-screen bg-slate-950 text-slate-100">
+          {/* Top bar */}
+          <div className="border-b border-slate-800 bg-slate-900/80 backdrop-blur">
+            <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="h-9 w-9 rounded-full bg-emerald-500 flex items-center justify-center text-slate-950 font-bold text-sm">
+                  GT
+                </div>
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.25em] text-slate-500">
+                    Endurance Strategy Console
+                  </div>
+                  <div className="text-lg font-semibold text-slate-50 flex items-center gap-2">
+                    Race Plan
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/40">
+                      Live
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-6 text-xs">
+                <div className="flex flex-col items-end">
+                  <span className="text-slate-400">Base Lap</span>
+                  <span className="font-mono text-sm text-slate-50">
+                    {formatTime(lapTimeSec)}
+                  </span>
+                </div>
+                <div className="flex flex-col items-end">
+                  <span className="text-slate-400">Race Duration</span>
+                  <span className="font-mono text-sm text-slate-50">
+                    {formatTimeToHMS(totalRaceDurationSec)}
+                  </span>
+                </div>
+                <div className="flex flex-col items-end">
+                  <span className="text-slate-400">Pit Baseline</span>
+                  <span className="font-mono text-sm text-slate-50">
+                    {fixedPitBase.toFixed(1)}s / {fuelTimePerPercent.toFixed(3)}s/VE%
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Main content */}
+          <div className="max-w-7xl mx-auto px-4 py-6 grid grid-cols-1 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,1.3fr)] gap-6">
+            {/* LEFT: Inputs + summary */}
+            <div className="space-y-4">
+              {/* Inputs card */}
+              <div className="bg-slate-900/80 border border-slate-800 rounded-2xl shadow-lg shadow-black/40 overflow-hidden">
+                <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
+                  <div>
+                    <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
+                      Setup & Conditions
+                    </div>
+                    <div className="text-sm text-slate-300">
+                      Fuel, tyres, penalties & timing
+                    </div>
+                  </div>
+                  <div className="flex gap-2 text-[10px]">
+                    <span className="px-2 py-1 rounded-full bg-red-500/20 text-red-300 border border-red-500/40">
+                      Soft
+                    </span>
+                    <span className="px-2 py-1 rounded-full bg-yellow-400/20 text-yellow-300 border border-yellow-400/40">
+                      Medium
+                    </span>
+                    <span className="px-2 py-1 rounded-full bg-slate-500/30 text-slate-200 border border-slate-500/60">
+                      Hard
+                    </span>
+                    <span className="px-2 py-1 rounded-full bg-blue-600/30 text-blue-200 border border-blue-500/60">
+                      Wet
+                    </span>
+                  </div>
+                </div>
+
+                <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Fuel & Pace */}
+                  <div className="space-y-3 text-xs">
+                    <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wide">
+                      Fuel & Pace
+                    </h3>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-slate-400 mb-1">
+                          Tank Capacity VE (%)
+                        </label>
+                        <input
+                          type="number"
+                          value={veTotal}
+                          onChange={(e) => setVeTotal(parseFloat(e.target.value) || 0)}
+                          className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-1.5 text-right"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-400 mb-1">
+                          Baseline VE / Lap (%)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={vePerLap}
+                          onChange={(e) => setVePerLap(parseFloat(e.target.value) || 0)}
+                          className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-1.5 text-right"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-400 mb-1">
+                          Base Lap Time (m:ss.sss)
+                        </label>
+                        <input
+                          type="text"
+                          value={lapTimeStr}
+                          onChange={handleLapTimeChange}
+                          className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-1.5 text-right"
+                        />
+                        <div className="text-[10px] text-right text-slate-500 mt-1">
+                          {lapTimeSec.toFixed(3)} sec
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-slate-400 mb-1">
+                          Race Time (H:MM:SS)
+                        </label>
+                        <input
+                          type="text"
+                          value={totalRaceDurationStr}
+                          onChange={handleRaceTimeChange}
+                          className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-1.5 text-right"
+                        />
+                        <div className="text-[10px] text-right text-slate-500 mt-1">
+                          {totalRaceDurationSec.toFixed(0)} s
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 mt-2">
+                      <div>
+                        <label className="block text-slate-400 mb-1">
+                          Safety Buffer (% VE)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          value={safetyBuffer}
+                          onChange={(e) =>
+                            setSafetyBuffer(parseFloat(e.target.value) || 0)
+                          }
+                          className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-1.5 text-right"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-400 mb-1">
+                          Tyre Deg (s/lap/lap)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.001"
+                          value={tyreDeg}
+                          onChange={(e) =>
+                            setTyreDeg(parseFloat(e.target.value) || 0)
+                          }
+                          className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-1.5 text-right"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Pits & Timing */}
+                  <div className="space-y-3 text-xs">
+                    <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wide">
+                      Pits & Time Losses
+                    </h3>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-slate-400 mb-1">
+                          Stop Box (s)
+                        </label>
+                        <input
+                          type="number"
+                          value={stopBoxTime}
+                          onChange={(e) =>
+                            setStopBoxTime(parseFloat(e.target.value) || 0)
+                          }
+                          className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-1.5 text-right"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-400 mb-1">
+                          Tyre Change (s)
+                        </label>
+                        <input
+                          type="number"
+                          value={tyreChangeTime}
+                          onChange={(e) =>
+                            setTyreChangeTime(parseFloat(e.target.value) || 0)
+                          }
+                          className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-1.5 text-right"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-400 mb-1">
+                          Fuel Time / %VE (s)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.001"
+                          value={fuelTimePerPercent}
+                          onChange={(e) =>
+                            setFuelTimePerPercent(parseFloat(e.target.value) || 0)
+                          }
+                          className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-1.5 text-right"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-400 mb-1">
+                          Out-lap Penalty (s)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          value={outLapPenaltySec}
+                          onChange={(e) =>
+                            setOutLapPenaltySec(parseFloat(e.target.value) || 0)
+                          }
+                          className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-1.5 text-right"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-400 mb-1">
+                          In-lap Penalty (s)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          value={inLapPenaltySec}
+                          onChange={(e) =>
+                            setInLapPenaltySec(parseFloat(e.target.value) || 0)
+                          }
+                          className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-1.5 text-right"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-400 mb-1">
+                          Warm-up (s, if tyres)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          value={warmupPenaltySec}
+                          onChange={(e) =>
+                            setWarmupPenaltySec(parseFloat(e.target.value) || 0)
+                          }
+                          className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-1.5 text-right"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-400 mb-1">
+                          Start Loss 1st (s)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          value={startLoss}
+                          onChange={(e) =>
+                            setStartLoss(parseFloat(e.target.value) || 0)
+                          }
+                          className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-1.5 text-right"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-400 mb-1">
+                          1st Lap Penalty (s)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          value={firstLapPenaltySec}
+                          onChange={(e) =>
+                            setFirstLapPenaltySec(parseFloat(e.target.value) || 0)
+                          }
+                          className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-1.5 text-right"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="mt-3 border-t border-slate-800 pt-3 grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-slate-400 mb-1 text-xs">
+                          Game Start Time
+                        </label>
+                        <input
+                          type="time"
+                          value={gameStartTime}
+                          onChange={(e) => setGameStartTime(e.target.value)}
+                          className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-1.5 text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-400 mb-1 text-xs">
+                          EST Start Time UTC
+                        </label>
+                        <input
+                          type="time"
+                          value={estStartTime}
+                          onChange={(e) => setEstStartTime(e.target.value)}
+                          className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-1.5 text-xs"
+                        />
+                        <div className="text-[10px] text-slate-500 mt-1">
+                          EST = Estimated Start (this column in Excel).
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Pace & Tyre deltas */}
+                <div className="px-4 pb-4 border-t border-slate-800 grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                  <div className="space-y-2">
+                    <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wide">
+                      Plan Pace Offsets
+                    </h3>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-slate-400 mb-1">
+                          Plan B (+1 lap) Δ (s/lap)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          value={pacePenaltyB}
+                          onChange={(e) =>
+                            setPacePenaltyB(parseFloat(e.target.value) || 0)
+                          }
+                          className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-1.5 text-right"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-400 mb-1">
+                          Plan C (+2 laps) Δ (s/lap)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          value={pacePenaltyC}
+                          onChange={(e) =>
+                            setPacePenaltyC(parseFloat(e.target.value) || 0)
+                          }
+                          className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-1.5 text-right"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wide">
+                      Tyre Compound Deltas (s/lap)
+                    </h3>
+                    <div className="grid grid-cols-2 gap-3">
+                      {["Soft", "Medium", "Hard", "Wet"].map((c) => (
+                        <div key={c}>
+                          <label className="block text-slate-400 mb-1">
+                            {c}
+                          </label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            value={tyreDeltas[c]}
+                            onChange={(e) =>
+                              setTyreDeltas((prev) => ({
+                                ...prev,
+                                [c]: parseFloat(e.target.value) || 0
+                              }))
+                            }
+                            className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-1.5 text-right"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Plan comparison */}
+              <div className="bg-slate-900/80 border border-slate-800 rounded-2xl shadow-lg shadow-black/40 overflow-hidden text-xs">
+                <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
+                  <div>
+                    <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
+                      Plan Comparison
+                    </div>
+                    <div className="text-sm text-slate-300">
+                      Laps & VE by plan
+                    </div>
+                  </div>
+                  <div className="flex gap-2 text-[10px]">
+                    <span className="px-2 py-1 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/40">
+                      A
+                    </span>
+                    <span className="px-2 py-1 rounded-full bg-yellow-400/10 text-yellow-300 border border-yellow-400/40">
+                      B
+                    </span>
+                    <span className="px-2 py-1 rounded-full bg-orange-500/10 text-orange-300 border border-orange-500/40">
+                      C
+                    </span>
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse">
+                    <thead>
+                      <tr className="border-b border-slate-800 text-[11px] uppercase text-slate-400">
+                        <th className="py-2 px-4 text-left">Metric</th>
+                        <th className="py-2 px-4 text-emerald-300 border-t-2 border-emerald-500">
+                          Plan A
+                        </th>
+                        <th className="py-2 px-4 text-yellow-300 border-t-2 border-yellow-500">
+                          Plan B
+                        </th>
+                        <th className="py-2 px-4 text-orange-300 border-t-2 border-orange-500">
+                          Plan C
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr className="border-b border-slate-900">
+                        <td className="py-2 px-4 text-slate-200">
+                          Total race laps
+                        </td>
+                        <td className="py-2 px-4 font-mono text-lg">
+                          {statsA.totalLaps}
+                        </td>
+                        <td className="py-2 px-4 font-mono text-lg">
+                          {statsB.totalLaps}
+                        </td>
+                        <td className="py-2 px-4 font-mono text-lg">
+                          {statsC.totalLaps}
+                        </td>
+                      </tr>
+                      <tr className="border-b border-slate-900">
+                        <td className="py-2 px-4 text-slate-200">
+                          Max standard stint laps
+                        </td>
+                        <td className="py-2 px-4 font-mono">{planA_laps}</td>
+                        <td className="py-2 px-4 font-mono">{planB_laps}</td>
+                        <td className="py-2 px-4 font-mono">{planC_laps}</td>
+                      </tr>
+                      <tr className="border-b border-slate-900">
+                        <td className="py-2 px-4 text-slate-200">
+                          Avg VE / lap (outline)
+                        </td>
+                        <td className="py-2 px-4 font-mono">
+                          {statsA.avgVePerLap.toFixed(3)}%
+                        </td>
+                        <td className="py-2 px-4 font-mono">
+                          {statsB.avgVePerLap.toFixed(3)}%
+                        </td>
+                        <td className="py-2 px-4 font-mono">
+                          {statsC.avgVePerLap.toFixed(3)}%
+                        </td>
+                      </tr>
+                      <tr className="border-b border-slate-900">
+                        <td className="py-2 px-4 text-slate-200">
+                          Δ vs baseline VE ({vePerLap.toFixed(2)}%)
+                        </td>
+                        <td className="py-2 px-4 font-mono">
+                          {(statsA.avgVePerLap - vePerLap).toFixed(3)}%
+                        </td>
+                        <td className="py-2 px-4 font-mono">
+                          {(statsB.avgVePerLap - vePerLap).toFixed(3)}%
+                        </td>
+                        <td className="py-2 px-4 font-mono">
+                          {(statsC.avgVePerLap - vePerLap).toFixed(3)}%
+                        </td>
+                      </tr>
+                      <tr className="border-b border-slate-900">
+                        <td className="py-2 px-4 text-slate-200">
+                          Theoretical VE left (std stint)
+                        </td>
+                        <td className="py-2 px-4 font-mono">
+                          {veLeftA.toFixed(2)}%
+                        </td>
+                        <td className="py-2 px-4 font-mono">
+                          {veLeftB.toFixed(2)}%
+                        </td>
+                        <td className="py-2 px-4 font-mono">
+                          {veLeftC.toFixed(2)}%
+                        </td>
+                      </tr>
+                      <tr className="border-b border-slate-900">
+                        <td className="py-2 px-4 text-slate-200">
+                          Std stint avg lap (incl deg + pace)
+                        </td>
+                        <td className="py-2 px-4 font-mono">
+                          {formatTime(planA_adjLapTime)}
+                        </td>
+                        <td className="py-2 px-4 font-mono">
+                          {formatTime(planB_adjLapTime)} (+{pacePenaltyB.toFixed(1)}s)
+                        </td>
+                        <td className="py-2 px-4 font-mono">
+                          {formatTime(planC_adjLapTime)} (+{pacePenaltyC.toFixed(1)}s)
+                        </td>
+                      </tr>
+                      <tr>
+                        <td className="py-2 px-4 text-slate-200">
+                          Total stints
+                        </td>
+                        <td className="py-2 px-4 font-mono">
+                          {statsA.totalStints}
+                        </td>
+                        <td className="py-2 px-4 font-mono">
+                          {statsB.totalStints}
+                        </td>
+                        <td className="py-2 px-4 font-mono">
+                          {statsC.totalStints}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            {/* RIGHT: Stint outline */}
+            <div className="space-y-4">
+              <div className="bg-slate-900/80 border border-slate-800 rounded-2xl shadow-lg shadow-black/40 flex flex-col h-[calc(100vh-9rem)]">
+                <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
+                  <div>
+                    <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
+                      Stint Outline
+                    </div>
+                    <div className="text-sm text-slate-300">
+                      Driver & tyre timeline, ready for Excel
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2 text-[11px]">
+                    <button
+                      onClick={() => setOutlinePlan("A")}
+                      className={
+                        outlinePlan === "A"
+                          ? "px-2.5 py-1 rounded-full bg-emerald-500 text-slate-950 font-semibold"
+                          : "px-2.5 py-1 rounded-full bg-slate-950 border border-slate-700 text-slate-300"
+                      }
+                    >
+                      Plan A
+                    </button>
+                    <button
+                      onClick={() => setOutlinePlan("B")}
+                      className={
+                        outlinePlan === "B"
+                          ? "px-2.5 py-1 rounded-full bg-yellow-400 text-slate-950 font-semibold"
+                          : "px-2.5 py-1 rounded-full bg-slate-950 border border-slate-700 text-slate-300"
+                      }
+                    >
+                      Plan B
+                    </button>
+                    <button
+                      onClick={() => setOutlinePlan("C")}
+                      className={
+                        outlinePlan === "C"
+                          ? "px-2.5 py-1 rounded-full bg-orange-500 text-slate-950 font-semibold"
+                          : "px-2.5 py-1 rounded-full bg-slate-950 border border-slate-700 text-slate-300"
+                      }
+                    >
+                      Plan C
+                    </button>
+                    <button
+                      onClick={exportOutlineToXLSX}
+                      className="px-2.5 py-1 rounded-full bg-blue-600 text-slate-50 font-semibold border border-blue-400/60"
+                    >
+                      Export XLSX
+                    </button>
+                  </div>
+                </div>
+
+                {/* Tyre pattern buttons */}
+                <div className="px-4 py-2 border-b border-slate-800 flex flex-wrap items-center gap-2 text-[11px] text-slate-300">
+                  <span className="text-slate-400">Quick tyre pattern:</span>
+                  <button
+                    onClick={() => applyTyrePattern(1)}
+                    className="px-2 py-0.5 rounded-full bg-slate-800 border border-slate-600 hover:bg-slate-700"
+                  >
+                    Every stint
+                  </button>
+                  <button
+                    onClick={() => applyTyrePattern(2)}
+                    className="px-2 py-0.5 rounded-full bg-slate-800 border border-slate-600 hover:bg-slate-700"
+                  >
+                    Every 2nd
+                  </button>
+                  <button
+                    onClick={() => applyTyrePattern(3)}
+                    className="px-2 py-0.5 rounded-full bg-slate-800 border border-slate-600 hover:bg-slate-700"
+                  >
+                    Every 3rd
+                  </button>
+                  <span className="text-slate-500">
+                    Stint 1 compound always editable (quali vs race set).
+                  </span>
+                </div>
+
+                <div className="flex-1 overflow-auto">
+                  <table className="w-full text-[11px] border-collapse">
+                    <thead className="bg-slate-900 sticky top-0 z-10">
+                      <tr className="border-b border-slate-800 text-slate-400 uppercase">
+                        <th className="py-2 px-2 text-left">Stint</th>
+                        <th className="py-2 px-2 text-right">Laps</th>
+                        <th className="py-2 px-2 text-right">Lap Target</th>
+                        <th className="py-2 px-2 text-right">VE / lap</th>
+                        <th className="py-2 px-2 text-right">VE used</th>
+                        <th className="py-2 px-2 text-right">Stint (min)</th>
+                        <th className="py-2 px-2 text-right">Pit (s)</th>
+                        <th className="py-2 px-2 text-center">Tyre</th>
+                        <th className="py-2 px-2 text-center">Set #</th>
+                        <th className="py-2 px-2 text-center">Compound</th>
+                        <th className="py-2 px-2 text-left">Driver</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {outlineRows.length === 0 && (
+                        <tr>
+                          <td className="py-4 px-2 text-center text-slate-500" colSpan={11}>
+                            Enter VE, lap time and race duration to generate stints.
+                          </td>
+                        </tr>
+                      )}
+                      {outlineRows.map((row) => {
+                        const key = `${outlinePlan}-${row.stintIndex}`;
+                        const savedDriver = driverNames[key] || "";
+                        const savedCompound = tyreCompoundMap[key];
+                        const compound = savedCompound !== undefined ? savedCompound : (row.compound || "Medium");
+                        const tyreChangeYes = row.tyreChange === "Yes";
+                        const canEditCompound = row.stintIndex === 1 || tyreChangeYes;
+                        const stintLengthMin = (((row.driveSeconds || 0) + (row.outPenaltySeconds || 0)) / 60).toFixed(1);
+
+                        const cellClass = canEditCompound
+                          ? (compoundColors[compound] || "bg-white text-black")
+                          : "bg-gray-200 text-gray-700";
+
+                        return (
+                          <tr
+                            key={row.stintIndex}
+                            className="border-b border-slate-900 hover:bg-slate-800/70"
+                          >
+                            <td className="py-2 px-2 font-mono text-left">
+                              {row.label}
+                            </td>
+                            <td className="py-2 px-2 font-mono text-right">
+                              {row.laps}
+                            </td>
+                            <td className="py-2 px-2 font-mono text-right">
+                              {formatTime(row.lapTimeTarget)}
+                            </td>
+                            <td className="py-2 px-2 font-mono text-right">
+                              {row.veTarget.toFixed(2)}%
+                            </td>
+                            <td className="py-2 px-2 font-mono text-right">
+                              {row.veUsed.toFixed(2)}%
+                            </td>
+                            <td className="py-2 px-2 font-mono text-right">
+                              {stintLengthMin}
+                            </td>
+                            <td className="py-2 px-2 font-mono text-right">
+                              {row.pitTime.toFixed(2)}
+                            </td>
+                            <td className="py-2 px-2 text-center">
+                              <label className="inline-flex items-center gap-1 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={row.tyreChange === "Yes"}
+                                  onChange={() =>
+                                    toggleTyreChange(outlinePlan, row.stintIndex, row.tyreChange)
+                                  }
+                                  className="form-checkbox h-3 w-3 rounded bg-slate-950 border-slate-600"
+                                />
+                                <span
+                                  className={
+                                    row.tyreChange === "Yes"
+                                      ? "px-2 py-0.5 rounded-full border border-emerald-400/60 text-emerald-300"
+                                      : "px-2 py-0.5 rounded-full border border-slate-600 text-slate-300"
+                                  }
+                                >
+                                  {row.tyreChange}
+                                </span>
+                              </label>
+                            </td>
+                            <td className="py-2 px-2 font-mono text-center">
+                              {row.tyreSet}
+                            </td>
+                            <td className="py-2 px-2 font-mono text-center">
+                              <div className={`rounded px-1 py-0.5 text-center ${cellClass}`}>
+                                <select
+                                  value={compound}
+                                  disabled={!canEditCompound}
+                                  onChange={(e) =>
+                                    handleCompoundChange(
+                                      outlinePlan,
+                                      row.stintIndex,
+                                      e.target.value
+                                    )
+                                  }
+                                  className="w-full text-[10px] border-none outline-none bg-transparent"
+                                >
+                                  <option value="Soft">Soft</option>
+                                  <option value="Medium">Medium</option>
+                                  <option value="Hard">Hard</option>
+                                  <option value="Wet">Wet</option>
+                                </select>
+                              </div>
+                            </td>
+                            <td className="py-2 px-2">
+                              <input
+                                type="text"
+                                value={savedDriver}
+                                onChange={(e) =>
+                                  handleDriverNameChange(
+                                    outlinePlan,
+                                    row.stintIndex,
+                                    e.target.value
+                                  )
+                                }
+                                className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-1 text-[11px]"
+                                placeholder="Driver"
+                              />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="px-4 py-2 border-t border-slate-800 text-[10px] text-slate-400 flex flex-wrap items-center gap-3">
+                  <span className="uppercase tracking-wide text-slate-500">
+                    Excel export:
+                  </span>
+                  <span>Game Start & EST Start (UTC) per stint.</span>
+                  <span>Tyres & tyre change are color coded.</span>
+                  <span>Drivers & availability left empty for user edits.</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.render(<StrategyCalculator />, document.getElementById("root"));
+  </script>
+</body>
+</html>
