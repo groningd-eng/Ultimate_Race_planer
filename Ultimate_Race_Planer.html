@@ -1,0 +1,1343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Ultimate Race Planner</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!-- Tailwind -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- React 18 -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+
+  <!-- Babel -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Inter", sans-serif;
+    }
+    input:focus, select:focus {
+      outline: none;
+      box-shadow: 0 0 0 2px rgba(16,185,129,0.55);
+    }
+    select {
+      background: #ffffff;
+      color: #000000;
+    }
+    select option {
+      background: #ffffff;
+      color: #000000;
+    }
+    select:disabled {
+      background: #d1d5db !important;
+      color: #4b5563 !important;
+    }
+    select:disabled option {
+      background: #d1d5db !important;
+      color: #4b5563 !important;
+    }
+  </style>
+</head>
+
+<body class="bg-slate-950 text-slate-100">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState } = React;
+
+    function RacePlanner() {
+      /* ------------------------------------------------------------
+         STATE / DEFAULTS
+      -------------------------------------------------------------*/
+
+      // Fuel & VE
+      const [veTotal] = useState(100);          // locked at 100
+      const [vePerLap, setVePerLap] = useState(4.5);
+      const [safetyBuffer, setSafetyBuffer] = useState(0.2);
+
+      // Lap time
+      const [lapTimeStr, setLapTimeStr] = useState("4:00.000");
+      const [lapTimeSec, setLapTimeSec] = useState(240);
+
+      // Race duration (24h)
+      const [raceDurationStr, setRaceDurationStr] = useState("24:00:00");
+      const [raceDurationSec, setRaceDurationSec] = useState(86400);
+
+      // Pits
+      const [basePit, setBasePit] = useState(25);
+      const [tyreChangeTime, setTyreChangeTime] = useState(13);
+      const [fuelRate, setFuelRate] = useState(0.4);     // 0.4 s / %VE
+
+      const [inLapLoss, setInLapLoss] = useState(1.5);
+      const [outLapLoss, setOutLapLoss] = useState(2.0);
+      const [warmupLoss, setWarmupLoss] = useState(3.0);
+
+      // Start penalties
+      const [startLoss] = useState(0);                  // removed from UI
+      const [firstLapPenalty, setFirstLapPenalty] = useState(5.0);
+
+      // Tyre deg
+      const [tyreDeg, setTyreDeg] = useState(0.02);
+
+      // Pace offsets for Plans
+      const [pacePenaltyB, setPacePenaltyB] = useState(0.5);
+      const [pacePenaltyC, setPacePenaltyC] = useState(1.0);
+
+      // Compound deltas
+      const [compoundDeltas, setCompoundDeltas] = useState({
+        Soft: -0.5,
+        Medium: 0.0,
+        Hard: 0.5,
+        Wet: 10.0
+      });
+
+      // Start times
+      const [gameStart, setGameStart] = useState("12:00");
+      const [utcStart,  setUtcStart]  = useState("14:00");
+
+      // Active plan (A/B/C)
+      const [plan, setPlan] = useState("A");
+
+      // Per-stint overrides
+      const [tyreChanges, setTyreChanges] = useState({});
+      const [stintCompounds, setStintCompounds] = useState({});
+      const [driverNames, setDriverNames] = useState({});
+
+      // Google Sheets help
+      const [showGsHelp, setShowGsHelp] = useState(false);
+
+      // Final stint strategy
+      // "pit"  = no fuel saving, extend pit time if needed
+      // "save" = try Super-Save VE% (up to maxSavePercent), then extend pit time if still needed
+      const [finalStintMode, setFinalStintMode] = useState("pit");
+      const [maxSavePercent, setMaxSavePercent] = useState(2);
+
+      /* ------------------------------------------------------------
+         BASIC TIME HELPERS
+      -------------------------------------------------------------*/
+
+      const parseTime = (val) => {
+        if (!val) return 0;
+        const p = val.split(":").map(Number);
+        if (p.length === 3) return p[0]*3600 + p[1]*60 + p[2];
+        if (p.length === 2) return p[0]*60 + p[1];
+        return p[0];
+      };
+
+      const formatLap = (s) => {
+        if (s <= 0) return "0:00.000";
+        const m = Math.floor(s/60);
+        const sec = (s % 60).toFixed(3).padStart(6,"0");
+        return `${m}:${sec}`;
+      };
+
+      const timeToMin = (hhmm) => {
+        const [h,m] = hhmm.split(":").map(Number);
+        return h*60 + m;
+      };
+
+      const minToTime = (mins) => {
+        const x = ((mins % 1440) + 1440) % 1440;
+        const h = String(Math.floor(x/60)).padStart(2,"0");
+        const m = String(x % 60).padStart(2,"0");
+        return `${h}:${m}`;
+      };
+
+      /* ------------------------------------------------------------
+         LAP / RACE INPUT HANDLERS
+      -------------------------------------------------------------*/
+
+      const handleLapTimeChange = (e) => {
+        const v = e.target.value;
+        setLapTimeStr(v);
+        const s = parseTime(v);
+        if (!Number.isNaN(s)) setLapTimeSec(s);
+      };
+
+      const handleRaceTimeChange = (e) => {
+        const v = e.target.value;
+        setRaceDurationStr(v);
+        const s = parseTime(v);
+        if (!Number.isNaN(s)) setRaceDurationSec(s);
+      };
+
+      /* ------------------------------------------------------------
+         PLAN DERIVATION (A / B / C)
+      -------------------------------------------------------------*/
+
+      const baseLapTime = lapTimeSec;
+      const usableVE   = veTotal - safetyBuffer;
+
+      const avgDegWithAge = (laps, deg, ageStart) => {
+        if (laps <= 0 || deg <= 0) return 0;
+        return deg * (2 * ageStart + (laps - 1)) / 2;
+      };
+
+      // Plan A
+      const planA_laps = Math.max(1, Math.floor(usableVE / vePerLap));
+      const planA_ve   = usableVE / planA_laps;
+      const planA_deg  = avgDegWithAge(planA_laps, tyreDeg, 0);
+      const planA_lap  = baseLapTime + planA_deg;
+
+      // Plan B
+      const planB_laps = planA_laps + 1;
+      const planB_ve   = usableVE / planB_laps;
+      const planB_deg  = avgDegWithAge(planB_laps, tyreDeg, 0);
+      const planB_lap  = baseLapTime + planB_deg + pacePenaltyB;
+
+      // Plan C
+      const planC_laps = planA_laps + 2;
+      const planC_ve   = usableVE / planC_laps;
+      const planC_deg  = avgDegWithAge(planC_laps, tyreDeg, 0);
+      const planC_lap  = baseLapTime + planC_deg + pacePenaltyC;
+
+      const getPlanConfig = (code) => {
+        if (code === "A") return { laps: planA_laps, veTarget: planA_ve, pace: 0 };
+        if (code === "B") return { laps: planB_laps, veTarget: planB_ve, pace: pacePenaltyB };
+        return { laps: planC_laps, veTarget: planC_ve, pace: pacePenaltyC };
+      };
+
+      /* ------------------------------------------------------------
+         PER-STINT OVERRIDES
+      -------------------------------------------------------------*/
+
+      const toggleTyreChange = (planCode, stintIndex, currentLabel) => {
+        const key = `${planCode}-${stintIndex}`;
+        setTyreChanges((prev) => ({
+          ...prev,
+          [key]: currentLabel === "Yes" ? false : true
+        }));
+      };
+
+      const setStintCompound = (planCode, stintIndex, value) => {
+        const key = `${planCode}-${stintIndex}`;
+        setStintCompounds((prev) => ({ ...prev, [key]: value }));
+      };
+
+      const setStintDriver = (planCode, stintIndex, value) => {
+        const key = `${planCode}-${stintIndex}`;
+        setDriverNames((prev) => ({ ...prev, [key]: value }));
+      };
+
+      /* ------------------------------------------------------------
+         COMPOUND COLOR HELPER (IN-APP UI COLORS)
+      -------------------------------------------------------------*/
+
+      const compoundColor = (compound) => {
+        switch (compound) {
+          case "Soft":   return "bg-red-600";
+          case "Medium": return "bg-yellow-500";
+          case "Hard":   return "bg-gray-500";
+          case "Wet":    return "bg-blue-600";
+          default:       return "bg-slate-800";
+        }
+      };
+
+      /* ------------------------------------------------------------
+         BUILD STINT OUTLINE (ALWAYS FINISH LAST LAP)
+         Now returns { rows, warning } and enforces VE <= 100 on final stint.
+         Supports finalStintMode = "pit" or "save".
+      -------------------------------------------------------------*/
+
+      const buildPlanOutline = (planCode) => {
+        const cfg = getPlanConfig(planCode);
+        if (!cfg || !cfg.laps || cfg.laps <= 0) return { rows: [], warning: "" };
+
+        const lapsStd    = cfg.laps;
+        const veTarget   = cfg.veTarget;
+        const paceOffset = cfg.pace;
+
+        const rows = [];
+        let usedTime  = 0;
+        let stintIdx  = 1;
+        let tyreSet   = 1;
+        let tyreAge   = 0;
+        const maxStints = 200;
+        const minLap   = Math.max(1, baseLapTime);
+        const MAX_TANK = 100; // Hard limit on VE per stint
+
+        let warning = "";
+
+        const getTyreChange = (idx) => {
+          const key = `${planCode}-${idx}`;
+          const override = tyreChanges[key];
+          if (override !== undefined) return override;
+          // default: no change first stint, yes for all others
+          return idx === 1 ? false : true;
+        };
+
+        const getCompound = (idx) => {
+          const key = `${planCode}-${idx}`;
+          const saved = stintCompounds[key];
+          if (saved) return saved;
+          return "Medium";
+        };
+
+        // Standard repeated stints until we're close to race duration
+        while (stintIdx <= maxStints) {
+          const tyreChange = getTyreChange(stintIdx);
+          const compound   = getCompound(stintIdx);
+          const compoundDelta = compoundDeltas[compound] ?? 0;
+
+          let ageStart;
+          if (stintIdx === 1) {
+            ageStart = 0;
+          } else {
+            ageStart = tyreChange ? 0 : tyreAge;
+          }
+
+          const laps = lapsStd;
+          const degPenalty = avgDegWithAge(laps, tyreDeg, ageStart);
+          const lapTarget  = baseLapTime + paceOffset + degPenalty + compoundDelta;
+          const veUsed     = laps * veTarget;
+
+          // Pit / drive segments
+          let pit   = 0;
+          let startExtra = 0;
+          let outLossVal = 0;
+          let inLoss  = inLapLoss;
+
+          if (stintIdx === 1) {
+            pit = 0;
+            startExtra = startLoss + firstLapPenalty;
+            outLossVal = 0;
+          } else {
+            const fuelTime = veUsed * fuelRate;
+            pit = basePit + fuelTime + (tyreChange ? tyreChangeTime : 0);
+            outLossVal = outLapLoss + (tyreChange ? warmupLoss : 0);
+          }
+
+          const drive = laps * lapTarget;
+          const block = pit + startExtra + outLossVal + drive + inLoss;
+
+          // If adding this full standard stint leaves more than one lap worth
+          // of time remaining, keep going; otherwise, break and treat the rest
+          // as final stint handled by logic below.
+          if (usedTime + block + minLap <= raceDurationSec) {
+            if (stintIdx === 1) {
+              tyreSet = tyreChange ? 2 : 1;
+            } else if (tyreChange) {
+              tyreSet += 1;
+            }
+
+            const newAge = (stintIdx === 1 || tyreChange) ? laps : (tyreAge + laps);
+            tyreAge = newAge;
+
+            rows.push({
+              stintIndex: stintIdx,
+              label: `${stintIdx}`,
+              laps,
+              lapTimeTarget: lapTarget,
+              veTarget,
+              veUsed,
+              pitTime: pit,
+              tyreChange: tyreChange ? "Yes" : "No",
+              tyreSet,
+              compound,
+              blockSeconds: block,
+              driveSeconds: drive,
+              outPenaltySeconds: outLossVal
+            });
+
+            usedTime += block;
+            stintIdx += 1;
+          } else {
+            break;
+          }
+        }
+
+        // FINAL STINT: ensure we finish the last lap,
+        // not end early before raceDurationSec, while respecting VE <= 100.
+        const remaining = raceDurationSec - usedTime;
+
+        const finalIdx  = stintIdx;
+        const tyreChangeFinal = getTyreChange(finalIdx);
+        const finalCompound   = getCompound(finalIdx);
+        const finalDelta      = compoundDeltas[finalCompound] ?? 0;
+
+        let finalTyreSet = tyreSet;
+        if (finalIdx === 1) {
+          finalTyreSet = tyreChangeFinal ? 2 : 1;
+        } else if (tyreChangeFinal) {
+          finalTyreSet += 1;
+        }
+
+        let ageStartFinal;
+        if (finalIdx === 1) {
+          ageStartFinal = 0;
+        } else {
+          ageStartFinal = tyreChangeFinal ? 0 : tyreAge;
+        }
+
+        const maxSearch = lapsStd + 40;
+
+        // Helper: search for a final stint with given VE target per lap
+        const searchWithVe = (vePerLap) => {
+          let solution = null;
+          let lastLegal = null;
+
+          for (let L = 1; L <= maxSearch; L++) {
+            const veU = L * vePerLap;
+            if (veU > MAX_TANK) break; // cannot exceed tank
+
+            const degP = avgDegWithAge(L, tyreDeg, ageStartFinal);
+            const lapT = baseLapTime + paceOffset + degP + finalDelta;
+
+            const fuelT = veU * fuelRate;
+            const pitFinal = basePit + fuelT + (tyreChangeFinal ? tyreChangeTime : 0);
+
+            let startE = 0;
+            let outF = 0;
+            const inF = inLapLoss;
+
+            if (finalIdx === 1) {
+              startE = startLoss + firstLapPenalty;
+              outF   = 0;
+            } else {
+              outF = outLapLoss + (tyreChangeFinal ? warmupLoss : 0);
+            }
+
+            const driveF = L * lapT;
+            const blockF = pitFinal + startE + outF + driveF + inF;
+
+            const candidate = {
+              L,
+              lapT,
+              veU,
+              pitFinal,
+              outF,
+              driveF,
+              blockF,
+              vePerLap
+            };
+
+            lastLegal = candidate;
+
+            if (blockF >= Math.max(remaining, 0)) {
+              solution = candidate;
+              break;
+            }
+          }
+
+          return { solution, lastLegal };
+        };
+
+        let chosen = null;
+
+        // 1) Try with standard VE target
+        const { solution: baseSolution, lastLegal: baseLastLegal } = searchWithVe(veTarget);
+
+        if (baseSolution) {
+          chosen = baseSolution;
+        } else if (finalStintMode === "save") {
+          // 2) Super-Save mode: try reducing VE target up to maxSavePercent
+          const maxRed = Math.max(0, Math.min(50, maxSavePercent || 0)); // clamp 0..50%
+          let saveSolution = null;
+          let bestLastLegal = baseLastLegal;
+
+          for (let red = 1; red <= maxRed; red++) {
+            const factor = 1 - red / 100;
+            const veLap = veTarget * factor;
+            const { solution, lastLegal } = searchWithVe(veLap);
+
+            if (lastLegal) bestLastLegal = lastLegal;
+
+            if (solution) {
+              saveSolution = solution;
+              warning = `Final stint uses Super Save: VE target reduced from ${veTarget.toFixed(2)} to ${veLap.toFixed(2)} %/lap to finish race within fuel.`;
+              break;
+            }
+          }
+
+          if (saveSolution) {
+            chosen = saveSolution;
+          } else if (bestLastLegal) {
+            // 3) Even Super-Save cannot fully cover time -> extend pit time
+            const missing = Math.max(0, remaining - bestLastLegal.blockF);
+            const extended = { ...bestLastLegal };
+            extended.pitFinal += missing;
+            extended.blockF   += missing;
+            chosen = extended;
+            warning = `Final stint cannot fully cover race distance at track pace within 100% VE (even with Super Save). Pit time extended by ${(missing/60).toFixed(1)} min to reach full race duration.`;
+          }
+        } else {
+          // finalStintMode === "pit" - don't change VE, just extend pit if needed
+          if (baseLastLegal) {
+            const missing = Math.max(0, remaining - baseLastLegal.blockF);
+            const extended = { ...baseLastLegal };
+            extended.pitFinal += missing;
+            extended.blockF   += missing;
+            chosen = extended;
+            warning = `Final stint cannot fully cover race distance at track pace within 100% VE. Pit time extended by ${(missing/60).toFixed(1)} min to reach full race duration.`;
+          }
+        }
+
+        if (chosen && chosen.L > 0) {
+          rows.push({
+            stintIndex: finalIdx,
+            label: `Last (${finalIdx})`,
+            laps: chosen.L,
+            lapTimeTarget: chosen.lapT,
+            veTarget: chosen.vePerLap,
+            veUsed: chosen.veU,
+            pitTime: chosen.pitFinal,
+            tyreChange: tyreChangeFinal ? "Yes" : "No",
+            tyreSet: finalTyreSet,
+            compound: finalCompound,
+            blockSeconds: chosen.blockF,
+            driveSeconds: chosen.driveF,
+            outPenaltySeconds: chosen.outF
+          });
+        } else if (rows.length > 0) {
+          const last = rows[rows.length - 1];
+          last.label = `Last (${last.stintIndex})`;
+        }
+
+        return { rows, warning };
+      };
+
+      /* ------------------------------------------------------------
+         PLAN STATS (FOR SUMMARY PANEL)
+      -------------------------------------------------------------*/
+
+      const getPlanStats = (code) => {
+        const { rows } = buildPlanOutline(code);
+        if (!rows.length) {
+          return {
+            totalLaps: 0,
+            totalVe: 0,
+            avgVELap: 0,
+            deltaVe: 0,
+            theoreticalLeft: 0,
+            totalStints: 0,
+            totalDriveSec: 0,
+            totalPitSec: 0,
+            totalTimeSec: 0,
+            maxStdLaps: 0,
+            stdLapTime: baseLapTime
+          };
+        }
+
+        const cfg = getPlanConfig(code);
+
+        const totalLaps = rows.reduce((s,r)=>s+r.laps,0);
+        const totalVe   = rows.reduce((s,r)=>s+r.veUsed,0);
+        const totalTimeSec = rows.reduce((s,r)=>s+(r.blockSeconds||0),0);
+        const totalDriveSec = rows.reduce((s,r)=>s+(r.driveSeconds||0),0);
+        const totalPitSec = totalTimeSec - totalDriveSec;
+
+        const maxStdLaps = rows.reduce((max,r)=>{
+          if (String(r.label).startsWith("Last")) return max;
+          return Math.max(max, r.laps);
+        },0);
+
+        const avgVELap = totalLaps ? totalVe/totalLaps : 0;
+        const baseline = 4.5;
+        const deltaVe  = avgVELap - baseline;
+
+        const theoreticalLeft = veTotal - cfg.laps * cfg.veTarget;
+
+        let stdLapTime = baseLapTime;
+        if (code === "A") stdLapTime = planA_lap;
+        else if (code === "B") stdLapTime = planB_lap;
+        else stdLapTime = planC_lap;
+
+        return {
+          totalLaps,
+          totalVe,
+          avgVELap,
+          deltaVe,
+          theoreticalLeft,
+          totalStints: rows.length,
+          totalDriveSec,
+          totalPitSec,
+          totalTimeSec,
+          maxStdLaps,
+          stdLapTime
+        };
+      };
+
+      const statsA = getPlanStats("A");
+      const statsB = getPlanStats("B");
+      const statsC = getPlanStats("C");
+
+      /* ------------------------------------------------------------
+         GOOGLE SHEETS COLOR SCRIPT (TEXT)
+      -------------------------------------------------------------*/
+
+      const googleSheetsColorScript = `
+function applyRaceplanColors() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  const values = sheet.getDataRange().getValues();
+
+  const STINT_COL       = 1;   // A
+  const LAPTIME_COL     = 2;   // B
+  const VETARGET_COL    = 3;   // C
+  const VEUSED_COL      = 4;   // D
+  const PITTIME_COL     = 5;   // E
+  const TYRECHANGE_COL  = 6;   // F
+  const COMPOUND_COL    = 7;   // G
+  const TYRESET_COL     = 8;   // H
+  const LAPS_COL        = 9;   // I
+  const STINTLEN_COL    = 10;  // J
+  const DRIVER_COL      = 11;  // K
+  const GAME_COL        = 12;  // L
+  const UTC_COL         = 13;  // M
+  const DRIVER_A_COL    = 14;  // N
+  const DRIVER_B_COL    = 15;  // O
+  const DRIVER_C_COL    = 16;  // P
+  const DRIVER_D_COL    = 17;  // Q
+  const AVAIL_COL       = 18;  // R
+  const MAYBE_COL       = 19;  // S
+  const UNAVAIL_COL     = 20;  // T
+
+  const COLORS = {
+    yes:         "#00C853",
+    no:          "#D50000",
+    soft:        "#FF0000",
+    medium:      "#FFD700",
+    hard:        "#BFBFBF",
+    wet:         "#0070C0",
+    driverA:     "#00FF00",
+    driverB:     "#FFFF00",
+    driverC:     "#FF0000",
+    driverD:     "#00FFFF",
+    gameBand:    "#00B8D9",
+    utcBand:     "#00B8D9",
+    available:   "#00C853",
+    maybe:       "#FFFF00",
+    unavailable: "#FF0000"
+  };
+
+  // Set driver header band
+  sheet.getRange(1, DRIVER_A_COL).setBackground(COLORS.driverA);
+  sheet.getRange(1, DRIVER_B_COL).setBackground(COLORS.driverB);
+  sheet.getRange(1, DRIVER_C_COL).setBackground(COLORS.driverC);
+  sheet.getRange(1, DRIVER_D_COL).setBackground(COLORS.driverD);
+
+  // Main rows (skip header row + Quali row)
+  for (let r = 3; r <= values.length; r++) {
+    const row = values[r - 1];
+
+    const tyreChange = String(row[TYRECHANGE_COL - 1] || "").toLowerCase();
+    const compound   = String(row[COMPOUND_COL    - 1] || "").toLowerCase();
+    const driver     = String(row[DRIVER_COL      - 1] || "").trim();
+
+    if (tyreChange === "yes") {
+      sheet.getRange(r, TYRECHANGE_COL).setBackground(COLORS.yes);
+    } else if (tyreChange === "no") {
+      sheet.getRange(r, TYRECHANGE_COL).setBackground(COLORS.no);
+    }
+
+    if (compound.includes("soft")) {
+      sheet.getRange(r, COMPOUND_COL).setBackground(COLORS.soft);
+    } else if (compound.includes("medium")) {
+      sheet.getRange(r, COMPOUND_COL).setBackground(COLORS.medium);
+    } else if (compound.includes("hard")) {
+      sheet.getRange(r, COMPOUND_COL).setBackground(COLORS.hard);
+    } else if (compound.includes("wet")) {
+      sheet.getRange(r, COMPOUND_COL).setBackground(COLORS.wet);
+    }
+
+    const nameA = String(values[0][DRIVER_A_COL - 1] || "").trim();
+    const nameB = String(values[0][DRIVER_B_COL - 1] || "").trim();
+    const nameC = String(values[0][DRIVER_C_COL - 1] || "").trim();
+    const nameD = String(values[0][DRIVER_D_COL - 1] || "").trim();
+
+    if (driver && driver === nameA) {
+      sheet.getRange(r, DRIVER_A_COL).setBackground(COLORS.driverA);
+    }
+    if (driver && driver === nameB) {
+      sheet.getRange(r, DRIVER_B_COL).setBackground(COLORS.driverB);
+    }
+    if (driver && driver === nameC) {
+      sheet.getRange(r, DRIVER_C_COL).setBackground(COLORS.driverC);
+    }
+    if (driver && driver === nameD) {
+      sheet.getRange(r, DRIVER_D_COL).setBackground(COLORS.driverD);
+    }
+
+    if (row[GAME_COL - 1]) {
+      sheet.getRange(r, GAME_COL).setBackground(COLORS.gameBand);
+    }
+    if (row[UTC_COL - 1]) {
+      sheet.getRange(r, UTC_COL).setBackground(COLORS.utcBand);
+    }
+  }
+
+  // Availability legend + any filled cells (no extra text rows at bottom)
+  for (let r = 1; r <= values.length; r++) {
+    const row = values[r - 1];
+    const a = String(row[AVAIL_COL  - 1] || "").toLowerCase();
+    const m = String(row[MAYBE_COL  - 1] || "").toLowerCase();
+    const u = String(row[UNAVAIL_COL- 1] || "").toLowerCase();
+
+    if (a === "available" || a === "a") {
+      sheet.getRange(r, AVAIL_COL).setBackground(COLORS.available);
+    }
+    if (m === "maybe" || m === "m") {
+      sheet.getRange(r, MAYBE_COL).setBackground(COLORS.maybe);
+    }
+    if (u === "unavailable" || u === "u") {
+      sheet.getRange(r, UNAVAIL_COL).setBackground(COLORS.unavailable);
+    }
+  }
+}
+`.trim();
+
+      const copyColorScriptToClipboard = () => {
+        if (navigator.clipboard && window.isSecureContext) {
+          navigator.clipboard
+            .writeText(googleSheetsColorScript)
+            .then(() => alert("Apps Script copied! Paste into Extensions → Apps Script in your Sheet."))
+            .catch(() => alert("Clipboard blocked. Please copy manually."));
+        } else {
+          alert("Clipboard not available. Please copy manually.");
+        }
+      };
+
+      /* ------------------------------------------------------------
+         OUTLINE ROWS + TIMED ROWS
+      -------------------------------------------------------------*/
+
+      const { rows: outlineRows, warning: currentPlanWarning } = buildPlanOutline(plan);
+
+      // Compute start times per stint for display/export
+      let gameMinForRows = timeToMin(gameStart);
+      let utcMinForRows  = timeToMin(utcStart);
+      const timedRows = outlineRows.map((r) => {
+        const startGame = gameMinForRows;
+        const startUtc  = utcMinForRows;
+        const blockMin  = (r.blockSeconds || 0) / 60;
+        gameMinForRows += blockMin;
+        utcMinForRows  += blockMin;
+        return {
+          ...r,
+          _gameStart: minToTime(Math.round(startGame)),
+          _utcStart:  minToTime(Math.round(startUtc))
+        };
+      });
+
+      /* ------------------------------------------------------------
+         CSV EXPORT FOR GOOGLE SHEETS
+      -------------------------------------------------------------*/
+
+      const exportCSV = () => {
+        if (!timedRows.length) {
+          alert("Nothing to export — no stints generated.");
+          return;
+        }
+
+        // Header row — confirmed
+        let csv = [
+          "Stint #",
+          "Lap Time Target",
+          "VE Target (%/lap)",
+          "VE Used (%)",
+          "Pit Time (s)",
+          "Tyre Change",
+          "Tyre Compound",
+          "Tyre Set #",
+          "Laps",
+          "Stint Length (min)",
+          "Driver",
+          "Game EST Start Time",
+          "UTC Start Time",
+          "Driver A",
+          "Driver B",
+          "Driver C",
+          "Driver D",
+          "Available",
+          "Maybe",
+          "Unavailable"
+        ].join(";") + "\n";
+
+        // Quali row
+        csv += "Quali;;;;;;;;;;;;;;;;;;;\n";
+
+        timedRows.forEach((r) => {
+          const key = `${plan}-${r.stintIndex}`;
+          const driver = (driverNames[key] || "").replace(/;/g, ",");
+
+          const lapTimeTxt  = "'" + formatLap(r.lapTimeTarget); // force text
+          const veTargetTxt = r.veTarget.toFixed(2).replace(".", ",");
+          const veUsedTxt   = r.veUsed.toFixed(2).replace(".", ",");
+          const pitTxt      = r.pitTime.toFixed(2).replace(".", ",");
+          const stintMin    = (
+            (r.driveSeconds + r.outPenaltySeconds) / 60
+          ).toFixed(1).replace(".", ",");
+
+          const line = [
+            r.label,
+            lapTimeTxt,
+            veTargetTxt,
+            veUsedTxt,
+            pitTxt,
+            r.tyreChange,
+            r.compound,
+            r.tyreSet,
+            r.laps,
+            stintMin,
+            driver,
+            r._gameStart,
+            r._utcStart,
+            "", "", "", "",
+            "", "", ""
+          ].join(";");
+
+          csv += line + "\n";
+        });
+
+        // NOTE: removed the extra three "Available/Maybe/Unavailable" label rows
+        // at the bottom of the CSV — user did not want those.
+
+        const blob = new Blob([csv], { type:"text/csv;charset=utf-8;"});
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = `Raceplan_${plan}_GoogleSheets.csv`;
+        link.click();
+      };
+
+      /* ------------------------------------------------------------
+         UI RENDER
+      -------------------------------------------------------------*/
+
+      return (
+        <div className="p-4 flex flex-col lg:flex-row gap-5">
+
+          {/* LEFT CONTROL PANEL */}
+          <div className="w-full lg:w-1/3 space-y-6">
+
+            {/* BASE SETTINGS */}
+            <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4 space-y-4">
+              <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
+                Base Settings
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs text-slate-400">Lap Time (m:ss.sss)</label>
+                  <input
+                    value={lapTimeStr}
+                    onChange={handleLapTimeChange}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-md px-2 py-1"
+                  />
+                  <div className="text-[10px] text-slate-500 mt-1">
+                    {lapTimeSec.toFixed(3)} s
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400">Race Duration (H:MM:SS)</label>
+                  <input
+                    value={raceDurationStr}
+                    onChange={handleRaceTimeChange}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-md px-2 py-1"
+                  />
+                  <div className="text-[10px] text-slate-500 mt-1">
+                    {(raceDurationSec/3600).toFixed(2)} h
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="text-xs text-slate-400">Tank VE (%)</label>
+                  <input
+                    type="number"
+                    value={veTotal}
+                    disabled
+                    className="w-full bg-slate-700 border border-slate-600 rounded-md px-2 py-1 text-slate-300 cursor-not-allowed"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400">Use per Lap</label>
+                  <input
+                    type="number"
+                    value={vePerLap}
+                    onChange={(e)=>setVePerLap(parseFloat(e.target.value)||0)}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-md px-2 py-1"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400">Safety Buffer</label>
+                  <input
+                    type="number"
+                    value={safetyBuffer}
+                    onChange={(e)=>setSafetyBuffer(parseFloat(e.target.value)||0)}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-md px-2 py-1"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400">Tyre Deg (s/lap/lap)</label>
+                <input
+                  type="number"
+                  step="0.001"
+                  value={tyreDeg}
+                  onChange={(e)=>setTyreDeg(parseFloat(e.target.value)||0)}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-md px-2 py-1"
+                />
+              </div>
+            </div>
+
+            {/* COMPOUND DELTAS */}
+            <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4 space-y-3">
+              <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
+                Tyre Compound Deltas (s/lap)
+              </div>
+              {["Soft","Medium","Hard","Wet"].map((c)=>(
+                <div key={c} className="flex items-center gap-2">
+                  <label className="w-20 text-xs text-slate-300">{c}</label>
+                  <input
+                    type="number"
+                    value={compoundDeltas[c]}
+                    onChange={(e)=>setCompoundDeltas({
+                      ...compoundDeltas,
+                      [c]: parseFloat(e.target.value)||0
+                    })}
+                    className="flex-1 bg-slate-800 border border-slate-700 rounded-md px-2 py-1"
+                  />
+                </div>
+              ))}
+            </div>
+
+            {/* PIT & TIME LOSSES */}
+            <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4 space-y-3">
+              <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
+                Pit & Time Loss
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="text-xs text-slate-400">Base Pit (s)</label>
+                  <input
+                    type="number"
+                    value={basePit}
+                    onChange={(e)=>setBasePit(parseFloat(e.target.value)||0)}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-md px-2 py-1"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400">Tyre Change (s)</label>
+                  <input
+                    type="number"
+                    value={tyreChangeTime}
+                    onChange={(e)=>setTyreChangeTime(parseFloat(e.target.value)||0)}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-md px-2 py-1"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400">Fuel (s/%VE)</label>
+                  <input
+                    type="number"
+                    value={fuelRate}
+                    onChange={(e)=>setFuelRate(parseFloat(e.target.value)||0)}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-md px-2 py-1"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="text-xs text-slate-400">In-lap Loss</label>
+                  <input
+                    type="number"
+                    value={inLapLoss}
+                    onChange={(e)=>setInLapLoss(parseFloat(e.target.value)||0)}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-md px-2 py-1"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400">Out-lap Loss</label>
+                  <input
+                    type="number"
+                    value={outLapLoss}
+                    onChange={(e)=>setOutLapLoss(parseFloat(e.target.value)||0)}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-md px-2 py-1"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400">Warmup (tyres)</label>
+                  <input
+                    type="number"
+                    value={warmupLoss}
+                    onChange={(e)=>setWarmupLoss(parseFloat(e.target.value)||0)}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-md px-2 py-1"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400">First Lap Penalty (s)</label>
+                <input
+                  type="number"
+                  value={firstLapPenalty}
+                  onChange={(e)=>setFirstLapPenalty(parseFloat(e.target.value)||0)}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-md px-2 py-1"
+                />
+              </div>
+            </div>
+
+            {/* START TIMES */}
+            <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4 space-y-3">
+              <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
+                Session Start Times
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400">Game Start Time</label>
+                <input
+                  type="time"
+                  value={gameStart}
+                  onChange={(e)=>setGameStart(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-md px-2 py-1"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400">EST Start Time UTC</label>
+                <input
+                  type="time"
+                  value={utcStart}
+                  onChange={(e)=>setUtcStart(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-md px-2 py-1"
+                />
+                <div className="text-[10px] text-slate-500 mt-1">
+                  EST = Estimated Start (UTC). Adjust for official timetable.
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          {/* RIGHT MAIN PANEL */}
+          <div className="w-full lg:w-2/3 space-y-6">
+
+            {/* PLAN SELECTOR + EXPORT */}
+            <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4 flex flex-wrap gap-3 items-center">
+              <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500 mr-3">
+                Plan
+              </div>
+              {["A","B","C"].map((p)=>(
+                <button
+                  key={p}
+                  onClick={()=>setPlan(p)}
+                  className={`px-4 py-1.5 rounded-full border ${
+                    plan===p
+                      ? "bg-emerald-600 border-emerald-400 text-white"
+                      : "bg-slate-800 border-slate-600 text-slate-300"
+                  }`}
+                >
+                  {p}
+                </button>
+              ))}
+
+              <div className="ml-auto flex items-center gap-2">
+                <button
+                  onClick={exportCSV}
+                  className="px-4 py-1.5 rounded-full bg-blue-600 border border-blue-400 text-white font-semibold"
+                >
+                  Export CSV for Google Sheets
+                </button>
+              </div>
+            </div>
+
+            {/* PLAN SUMMARY PANEL (A / B / C) */}
+            <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4 text-xs">
+              <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500 mb-2">
+                Plan Comparison Summary
+              </div>
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr className="text-[11px] text-slate-400 border-b border-slate-800">
+                    <th className="text-left py-1">Metric</th>
+                    <th className="text-center py-1 text-emerald-300">Plan A</th>
+                    <th className="text-center py-1 text-yellow-300">Plan B</th>
+                    <th className="text-center py-1 text-orange-300">Plan C</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="border-b border-slate-900">
+                    <td className="py-1">Total race laps</td>
+                    <td className="text-center">{statsA.totalLaps}</td>
+                    <td className="text-center">{statsB.totalLaps}</td>
+                    <td className="text-center">{statsC.totalLaps}</td>
+                  </tr>
+                  <tr className="border-b border-slate-900">
+                    <td className="py-1">Max standard stint laps</td>
+                    <td className="text-center">{statsA.maxStdLaps}</td>
+                    <td className="text-center">{statsB.maxStdLaps}</td>
+                    <td className="text-center">{statsC.maxStdLaps}</td>
+                  </tr>
+                  <tr className="border-b border-slate-900">
+                    <td className="py-1">Avg VE / lap (outline)</td>
+                    <td className="text-center">{statsA.avgVELap.toFixed(3)}</td>
+                    <td className="text-center">{statsB.avgVELap.toFixed(3)}</td>
+                    <td className="text-center">{statsC.avgVELap.toFixed(3)}</td>
+                  </tr>
+                  <tr className="border-b border-slate-900">
+                    <td className="py-1">Theoretical VE left (std stint)</td>
+                    <td className="text-center">{statsA.theoreticalLeft.toFixed(2)}</td>
+                    <td className="text-center">{statsB.theoreticalLeft.toFixed(2)}</td>
+                    <td className="text-center">{statsC.theoreticalLeft.toFixed(2)}</td>
+                  </tr>
+                  <tr className="border-b border-slate-900">
+                    <td className="py-1">Std stint lap time (s)</td>
+                    <td className="text-center">{statsA.stdLapTime.toFixed(3)}</td>
+                    <td className="text-center">{statsB.stdLapTime.toFixed(3)}</td>
+                    <td className="text-center">{statsC.stdLapTime.toFixed(3)}</td>
+                  </tr>
+                  <tr className="border-b border-slate-900">
+                    <td className="py-1">Total stints</td>
+                    <td className="text-center">{statsA.totalStints}</td>
+                    <td className="text-center">{statsB.totalStints}</td>
+                    <td className="text-center">{statsC.totalStints}</td>
+                  </tr>
+                  <tr className="border-b border-slate-900">
+                    <td className="py-1">Drive time (min)</td>
+                    <td className="text-center">{(statsA.totalDriveSec/60).toFixed(1)}</td>
+                    <td className="text-center">{(statsB.totalDriveSec/60).toFixed(1)}</td>
+                    <td className="text-center">{(statsC.totalDriveSec/60).toFixed(1)}</td>
+                  </tr>
+                  <tr className="border-b border-slate-900">
+                    <td className="py-1">Pit time (min)</td>
+                    <td className="text-center">{(statsA.totalPitSec/60).toFixed(1)}</td>
+                    <td className="text-center">{(statsB.totalPitSec/60).toFixed(1)}</td>
+                    <td className="text-center">{(statsC.totalPitSec/60).toFixed(1)}</td>
+                  </tr>
+                  <tr>
+                    <td className="py-1">Total time (min)</td>
+                    <td className="text-center">{(statsA.totalTimeSec/60).toFixed(1)}</td>
+                    <td className="text-center">{(statsB.totalTimeSec/60).toFixed(1)}</td>
+                    <td className="text-center">{(statsC.totalTimeSec/60).toFixed(1)}</td>
+                  </tr>
+                </tbody>
+              </table>
+              <div className="mt-2 text-[10px] text-slate-500">
+                Final stint always adjusted so the race duration is fully covered without exceeding 100% VE.
+              </div>
+            </div>
+
+            {/* FINAL STINT STRATEGY PANEL */}
+            <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4 space-y-3">
+              <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500 mb-1">
+                Final Stint Strategy
+              </div>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div className="space-y-2 text-xs">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      className="accent-emerald-500"
+                      checked={finalStintMode === "pit"}
+                      onChange={()=>setFinalStintMode("pit")}
+                    />
+                    <span>Auto extend pit time if last stint can't finish within 100% VE.</span>
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      className="accent-emerald-500"
+                      checked={finalStintMode === "save"}
+                      onChange={()=>setFinalStintMode("save")}
+                    />
+                    <span>Try Super-Save VE% on last stint first, then extend pit if still needed.</span>
+                  </label>
+                </div>
+                <div className="text-xs">
+                  <label className="block text-slate-400 mb-1">
+                    Max Super-Save Reduction (%)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={50}
+                    value={maxSavePercent}
+                    disabled={finalStintMode !== "save"}
+                    onChange={(e)=>{
+                      const v = parseFloat(e.target.value);
+                      const clamped = Math.max(0, Math.min(50, isNaN(v)?0:v));
+                      setMaxSavePercent(clamped);
+                    }}
+                    className={
+                      "w-20 bg-slate-800 border border-slate-700 rounded-md px-2 py-1 " +
+                      (finalStintMode !== "save" ? "opacity-60 cursor-not-allowed" : "")
+                    }
+                  />
+                  <div className="mt-1 text-[10px] text-slate-500">
+                    Only affects the last stint in Super-Save mode.
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* OUTLINE TABLE */}
+            <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4">
+              <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500 mb-2">
+                Stint Outline (Plan {plan})
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-max w-full text-xs border-separate border-spacing-y-1">
+                  <thead className="text-[11px] text-slate-400">
+                    <tr>
+                      <th>Stint</th>
+                      <th>Lap Target</th>
+                      <th>VE Tgt</th>
+                      <th>VE Used</th>
+                      <th>Pit</th>
+                      <th>Tyre Chg</th>
+                      <th>Compound</th>
+                      <th>Set #</th>
+                      <th>Laps</th>
+                      <th>Length (min)</th>
+                      <th>Driver</th>
+                      <th>Game Start</th>
+                      <th>UTC Start</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {timedRows.map((r)=>{
+                      const key = `${plan}-${r.stintIndex}`;
+                      const stintMins = ((r.driveSeconds + r.outPenaltySeconds)/60).toFixed(1);
+                      const isNoChange = r.stintIndex !== 1 && r.tyreChange === "No";
+                      const compoundValue = stintCompounds[key] || r.compound;
+
+                      return (
+                        <tr key={key} className="bg-slate-900/80">
+                          <td className="px-2 py-1">{r.label}</td>
+                          <td className="px-2 py-1">{formatLap(r.lapTimeTarget)}</td>
+                          <td className="px-2 py-1">{r.veTarget.toFixed(2)}</td>
+                          <td className="px-2 py-1">{r.veUsed.toFixed(2)}</td>
+                          <td className="px-2 py-1">{r.pitTime.toFixed(2)}</td>
+                          <td className="px-2 py-1">
+                            <button
+                              onClick={()=>toggleTyreChange(plan, r.stintIndex, r.tyreChange)}
+                              className={`px-2 py-0.5 rounded ${
+                                r.tyreChange==="Yes"
+                                  ? "bg-green-600"
+                                  : "bg-red-600"
+                              }`}
+                            >
+                              {r.tyreChange}
+                            </button>
+                          </td>
+                          <td className="px-2 py-1 text-white">
+                            <select
+                              value={compoundValue}
+                              disabled={isNoChange}
+                              onChange={(e)=>setStintCompound(plan,r.stintIndex,e.target.value)}
+                              className={
+                                "w-full rounded border border-slate-700 px-2 py-1 text-white " +
+                                (isNoChange
+                                  ? "bg-slate-700 cursor-not-allowed opacity-60"
+                                  : compoundColor(compoundValue))
+                              }
+                            >
+                              <option value="Soft">Soft</option>
+                              <option value="Medium">Medium</option>
+                              <option value="Hard">Hard</option>
+                              <option value="Wet">Wet</option>
+                            </select>
+                          </td>
+                          <td className="px-2 py-1">{r.tyreSet}</td>
+                          <td className="px-2 py-1">{r.laps}</td>
+                          <td className="px-2 py-1">{stintMins}</td>
+                          <td className="px-2 py-1">
+                            <input
+                              type="text"
+                              value={driverNames[key] || ""}
+                              onChange={(e)=>setStintDriver(plan,r.stintIndex,e.target.value)}
+                              className="w-24 bg-slate-800 border border-slate-700 rounded px-2 py-0.5"
+                            />
+                          </td>
+                          <td className="px-2 py-1">{r._gameStart}</td>
+                          <td className="px-2 py-1">{r._utcStart}</td>
+                        </tr>
+                      );
+                    })}
+                    {!timedRows.length && (
+                      <tr>
+                        <td colSpan={13} className="text-center text-slate-500 py-4">
+                          Enter VE, lap time and race duration to generate outline.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              {currentPlanWarning && (
+                <div className="mt-3 text-xs text-amber-300">
+                  ⚠ {currentPlanWarning}
+                </div>
+              )}
+            </div>
+
+            {/* GOOGLE SHEETS COLOR HELP PANEL */}
+            <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
+                    Google Sheets Coloring
+                  </div>
+                  <div className="text-slate-300 text-sm">
+                    Auto-color tyre changes, compounds, drivers & availability
+                  </div>
+                </div>
+
+                <button
+                  onClick={()=>setShowGsHelp(v=>!v)}
+                  className="px-3 py-1 rounded-full bg-slate-800 border border-slate-600 text-xs"
+                >
+                  {showGsHelp ? "Hide" : "Show"} Guide
+                </button>
+              </div>
+
+              {showGsHelp && (
+                <div className="mt-4 space-y-3 text-sm">
+                  <ol className="list-decimal list-inside space-y-1 text-slate-300">
+                    <li>Click <b>Export CSV for Google Sheets</b>.</li>
+                    <li>Import CSV into a new Google Sheet (separator = <b>semicolon</b>).</li>
+                    <li>Go to <b>Extensions → Apps Script</b>.</li>
+                    <li>Delete everything and paste the script below.</li>
+                    <li>In row 1, columns N–Q, type your Driver A–D names.</li>
+                    <li>Run <code>applyRaceplanColors()</code>.</li>
+                  </ol>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-slate-400 text-xs">Apps Script</span>
+                      <button
+                        onClick={copyColorScriptToClipboard}
+                        className="px-2 py-1 rounded bg-emerald-600 text-[11px] font-semibold"
+                      >
+                        Copy Script
+                      </button>
+                    </div>
+                    <textarea
+                      readOnly
+                      className="w-full h-40 bg-slate-950 border border-slate-700 rounded-md px-2 py-1 font-mono text-[10px] text-slate-200"
+                      value={googleSheetsColorScript}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+          </div>
+        </div>
+      );
+    }
+
+    /* ------------------------------------------------------------
+       RENDER APP
+    -------------------------------------------------------------*/
+
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<RacePlanner />);
+  </script>
+</body>
+</html>
