@@ -5,8 +5,13 @@
   <title>Ultimate Race Planner</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-  <!-- Tailwind -->
+  <!-- Tailwind (layout utility only; main "HUD" look is custom CSS below) -->
   <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Fonts (HUD-ish) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700&family=Rajdhani:wght@400;600;700&display=swap" rel="stylesheet">
 
   <!-- React 18 -->
   <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
@@ -16,33 +21,206 @@
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
   <style>
-    body {
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Inter", sans-serif;
+    :root{
+      --bg: #05070c;
+      --panel: rgba(12, 16, 26, 0.92);
+      --panel2: rgba(9, 12, 20, 0.92);
+      --border: rgba(255,255,255,0.10);
+      --border2: rgba(255,255,255,0.16);
+      --txt: rgba(235, 245, 255, 0.92);
+      --muted: rgba(180, 200, 220, 0.62);
+
+      --lime: #7CFF5B;
+      --mag: #FF38D1;
+      --cyan: #36D7FF;
+      --amber: #FFC857;
+      --red: #FF3B3B;
+
+      --shadow: 0 12px 40px rgba(0,0,0,0.65);
+      --glowL: 0 0 18px rgba(124,255,91,0.22);
+      --glowM: 0 0 18px rgba(255,56,209,0.22);
+      --glowC: 0 0 18px rgba(54,215,255,0.22);
     }
-    input:focus, select:focus {
+
+    body{
+      margin: 0;
+      background: radial-gradient(1200px 700px at 30% -10%, rgba(54,215,255,0.16), transparent 55%),
+                  radial-gradient(1100px 700px at 85% 10%, rgba(255,56,209,0.10), transparent 55%),
+                  radial-gradient(1000px 700px at 50% 100%, rgba(124,255,91,0.08), transparent 55%),
+                  var(--bg);
+      color: var(--txt);
+      font-family: Rajdhani, system-ui, -apple-system, Segoe UI, sans-serif;
+      letter-spacing: 0.2px;
+    }
+
+    /* HUD cards */
+    .hud-card{
+      background: linear-gradient(180deg, rgba(16,20,34,0.92), rgba(9,12,20,0.92));
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      position: relative;
+    }
+    .hud-card::before{
+      content:"";
+      position:absolute; inset:0;
+      pointer-events:none;
+      background: linear-gradient(90deg,
+        rgba(54,215,255,0.10),
+        rgba(255,56,209,0.08),
+        rgba(124,255,91,0.08)
+      );
+      opacity: 0.25;
+      mix-blend-mode: screen;
+    }
+
+    .hud-head{
+      position: relative;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 12px;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(90deg, rgba(0,0,0,0.45), rgba(0,0,0,0.12));
+    }
+    .hud-title{
+      font-family: Orbitron, Rajdhani, sans-serif;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      font-size: 11px;
+      color: rgba(235,245,255,0.78);
+      display:flex;
+      align-items:center;
+      gap: 10px;
+    }
+    .hud-chip{
+      font-family: Orbitron, sans-serif;
+      font-size: 10px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--border2);
+      background: rgba(0,0,0,0.35);
+      color: rgba(235,245,255,0.82);
+    }
+
+    .hud-body{ position: relative; padding: 12px; }
+
+    .hud-label{ font-size: 12px; color: var(--muted); }
+    .hud-help{ font-size: 11px; color: rgba(180,200,220,0.55); }
+
+    .hud-input, .hud-select, .hud-btn{
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(0,0,0,0.35);
+      color: rgba(235,245,255,0.92);
+      padding: 8px 10px;
       outline: none;
-      box-shadow: 0 0 0 2px rgba(16,185,129,0.55);
+      transition: 120ms ease;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04);
     }
-    select {
-      background: #ffffff;
-      color: #000000;
+    .hud-input:focus, .hud-select:focus{
+      border-color: rgba(54,215,255,0.45);
+      box-shadow: 0 0 0 3px rgba(54,215,255,0.18), inset 0 0 0 1px rgba(255,255,255,0.06);
     }
-    select option {
-      background: #ffffff;
-      color: #000000;
+    .hud-select option{
+      background: #0b0f1a;
+      color: rgba(235,245,255,0.92);
     }
-    select:disabled {
-      background: #d1d5db !important;
-      color: #4b5563 !important;
+    .hud-input[disabled], .hud-select[disabled]{
+      opacity: 0.55;
+      cursor: not-allowed;
     }
-    select:disabled option {
-      background: #d1d5db !important;
-      color: #4b5563 !important;
+
+    .hud-btn{
+      font-family: Orbitron, sans-serif;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-size: 11px;
+      padding: 9px 12px;
+    }
+    .btn-lime{ border-color: rgba(124,255,91,0.45); box-shadow: var(--glowL); }
+    .btn-mag { border-color: rgba(255,56,209,0.45); box-shadow: var(--glowM); }
+    .btn-cyan{ border-color: rgba(54,215,255,0.45); box-shadow: var(--glowC); }
+    .btn-lime.active{ background: rgba(124,255,91,0.14); }
+    .btn-mag.active { background: rgba(255,56,209,0.14); }
+    .btn-cyan.active{ background: rgba(54,215,255,0.14); }
+
+    .hud-grid{ display:grid; gap: 10px; }
+    .hud-grid.cols2{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .hud-grid.cols3{ grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+    .hud-table{
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0 8px;
+      font-size: 12px;
+    }
+    .hud-th{
+      font-family: Orbitron, sans-serif;
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: rgba(180,200,220,0.65);
+      padding: 6px 10px;
+      text-align: left;
+      white-space: nowrap;
+    }
+    .hud-row{
+      background: rgba(0,0,0,0.34);
+      border: 1px solid rgba(255,255,255,0.10);
+    }
+    .hud-td{
+      padding: 8px 10px;
+      border-top: 1px solid rgba(255,255,255,0.08);
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      white-space: nowrap;
+    }
+    .hud-td:first-child{
+      border-left: 1px solid rgba(255,255,255,0.08);
+      border-radius: 12px 0 0 12px;
+    }
+    .hud-td:last-child{
+      border-right: 1px solid rgba(255,255,255,0.08);
+      border-radius: 0 12px 12px 0;
+    }
+
+    .tag{
+      display:inline-flex;
+      align-items:center;
+      gap: 6px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.14);
+      font-size: 11px;
+      background: rgba(0,0,0,0.25);
+      color: rgba(235,245,255,0.86);
+    }
+    .dot{ width: 8px; height: 8px; border-radius: 999px; display:inline-block; }
+
+    /* Compound "chips" (table select keeps your color logic but slightly HUD-ified) */
+    .cmp-soft{ background: rgba(255,59,59,0.20) !important; border-color: rgba(255,59,59,0.45) !important; }
+    .cmp-med { background: rgba(255,200,87,0.18) !important; border-color: rgba(255,200,87,0.45) !important; }
+    .cmp-hard{ background: rgba(200,210,220,0.14) !important; border-color: rgba(200,210,220,0.35) !important; }
+    .cmp-wet { background: rgba(54,215,255,0.16) !important; border-color: rgba(54,215,255,0.45) !important; }
+
+    .warn{
+      border: 1px solid rgba(255,200,87,0.35);
+      background: rgba(255,200,87,0.10);
+      border-radius: 12px;
+      padding: 10px 12px;
+      color: rgba(255,230,170,0.95);
+    }
+
+    @media (max-width: 1024px){
+      .hud-grid.cols3{ grid-template-columns: 1fr; }
     }
   </style>
 </head>
 
-<body class="bg-slate-950 text-slate-100">
+<body>
   <div id="root"></div>
 
   <script type="text/babel">
@@ -82,7 +260,7 @@
       // Tyre deg
       const [tyreDeg, setTyreDeg] = useState(0.02);
 
-      // Pace offsets for Plans
+      // ✅ Delta adjustability for Plan B / C (pace penalty s/lap)
       const [pacePenaltyB, setPacePenaltyB] = useState(0.5);
       const [pacePenaltyC, setPacePenaltyC] = useState(1.0);
 
@@ -110,8 +288,6 @@
       const [showGsHelp, setShowGsHelp] = useState(false);
 
       // Final stint strategy
-      // "pit"  = no fuel saving, extend pit time if needed
-      // "save" = try Super-Save VE% (up to maxSavePercent), then extend pit time if still needed
       const [finalStintMode, setFinalStintMode] = useState("pit");
       const [maxSavePercent, setMaxSavePercent] = useState(2);
 
@@ -147,7 +323,7 @@
       };
 
       /* ------------------------------------------------------------
-         LAP / RACE INPUT HANDLERS
+         INPUT HANDLERS
       -------------------------------------------------------------*/
 
       const handleLapTimeChange = (e) => {
@@ -223,23 +399,22 @@
       };
 
       /* ------------------------------------------------------------
-         COMPOUND COLOR HELPER (IN-APP UI COLORS)
+         COMPOUND COLOR HELPER
       -------------------------------------------------------------*/
 
-      const compoundColor = (compound) => {
+      const compoundClass = (compound) => {
         switch (compound) {
-          case "Soft":   return "bg-red-600";
-          case "Medium": return "bg-yellow-500";
-          case "Hard":   return "bg-gray-500";
-          case "Wet":    return "bg-blue-600";
-          default:       return "bg-slate-800";
+          case "Soft":   return "cmp-soft";
+          case "Medium": return "cmp-med";
+          case "Hard":   return "cmp-hard";
+          case "Wet":    return "cmp-wet";
+          default:       return "";
         }
       };
 
       /* ------------------------------------------------------------
          BUILD STINT OUTLINE (ALWAYS FINISH LAST LAP)
-         Now returns { rows, warning } and enforces VE <= 100 on final stint.
-         Supports finalStintMode = "pit" or "save".
+         returns { rows, warning } and enforces VE <= 100 on final stint.
       -------------------------------------------------------------*/
 
       const buildPlanOutline = (planCode) => {
@@ -257,7 +432,7 @@
         let tyreAge   = 0;
         const maxStints = 200;
         const minLap   = Math.max(1, baseLapTime);
-        const MAX_TANK = 100; // Hard limit on VE per stint
+        const MAX_TANK = 100;
 
         let warning = "";
 
@@ -265,7 +440,6 @@
           const key = `${planCode}-${idx}`;
           const override = tyreChanges[key];
           if (override !== undefined) return override;
-          // default: no change first stint, yes for all others
           return idx === 1 ? false : true;
         };
 
@@ -276,25 +450,20 @@
           return "Medium";
         };
 
-        // Standard repeated stints until we're close to race duration
         while (stintIdx <= maxStints) {
           const tyreChange = getTyreChange(stintIdx);
           const compound   = getCompound(stintIdx);
           const compoundDelta = compoundDeltas[compound] ?? 0;
 
           let ageStart;
-          if (stintIdx === 1) {
-            ageStart = 0;
-          } else {
-            ageStart = tyreChange ? 0 : tyreAge;
-          }
+          if (stintIdx === 1) ageStart = 0;
+          else ageStart = tyreChange ? 0 : tyreAge;
 
           const laps = lapsStd;
           const degPenalty = avgDegWithAge(laps, tyreDeg, ageStart);
           const lapTarget  = baseLapTime + paceOffset + degPenalty + compoundDelta;
           const veUsed     = laps * veTarget;
 
-          // Pit / drive segments
           let pit   = 0;
           let startExtra = 0;
           let outLossVal = 0;
@@ -313,18 +482,11 @@
           const drive = laps * lapTarget;
           const block = pit + startExtra + outLossVal + drive + inLoss;
 
-          // If adding this full standard stint leaves more than one lap worth
-          // of time remaining, keep going; otherwise, break and treat the rest
-          // as final stint handled by logic below.
           if (usedTime + block + minLap <= raceDurationSec) {
-            if (stintIdx === 1) {
-              tyreSet = tyreChange ? 2 : 1;
-            } else if (tyreChange) {
-              tyreSet += 1;
-            }
+            if (stintIdx === 1) tyreSet = tyreChange ? 2 : 1;
+            else if (tyreChange) tyreSet += 1;
 
-            const newAge = (stintIdx === 1 || tyreChange) ? laps : (tyreAge + laps);
-            tyreAge = newAge;
+            tyreAge = (stintIdx === 1 || tyreChange) ? laps : (tyreAge + laps);
 
             rows.push({
               stintIndex: stintIdx,
@@ -349,8 +511,6 @@
           }
         }
 
-        // FINAL STINT: ensure we finish the last lap,
-        // not end early before raceDurationSec, while respecting VE <= 100.
         const remaining = raceDurationSec - usedTime;
 
         const finalIdx  = stintIdx;
@@ -359,29 +519,22 @@
         const finalDelta      = compoundDeltas[finalCompound] ?? 0;
 
         let finalTyreSet = tyreSet;
-        if (finalIdx === 1) {
-          finalTyreSet = tyreChangeFinal ? 2 : 1;
-        } else if (tyreChangeFinal) {
-          finalTyreSet += 1;
-        }
+        if (finalIdx === 1) finalTyreSet = tyreChangeFinal ? 2 : 1;
+        else if (tyreChangeFinal) finalTyreSet += 1;
 
         let ageStartFinal;
-        if (finalIdx === 1) {
-          ageStartFinal = 0;
-        } else {
-          ageStartFinal = tyreChangeFinal ? 0 : tyreAge;
-        }
+        if (finalIdx === 1) ageStartFinal = 0;
+        else ageStartFinal = tyreChangeFinal ? 0 : tyreAge;
 
         const maxSearch = lapsStd + 40;
 
-        // Helper: search for a final stint with given VE target per lap
-        const searchWithVe = (vePerLap) => {
+        const searchWithVe = (vePerLapX) => {
           let solution = null;
           let lastLegal = null;
 
           for (let L = 1; L <= maxSearch; L++) {
-            const veU = L * vePerLap;
-            if (veU > MAX_TANK) break; // cannot exceed tank
+            const veU = L * vePerLapX;
+            if (veU > MAX_TANK) break;
 
             const degP = avgDegWithAge(L, tyreDeg, ageStartFinal);
             const lapT = baseLapTime + paceOffset + degP + finalDelta;
@@ -403,17 +556,7 @@
             const driveF = L * lapT;
             const blockF = pitFinal + startE + outF + driveF + inF;
 
-            const candidate = {
-              L,
-              lapT,
-              veU,
-              pitFinal,
-              outF,
-              driveF,
-              blockF,
-              vePerLap
-            };
-
+            const candidate = { L, lapT, veU, pitFinal, outF, driveF, blockF, vePerLap: vePerLapX };
             lastLegal = candidate;
 
             if (blockF >= Math.max(remaining, 0)) {
@@ -426,15 +569,12 @@
         };
 
         let chosen = null;
-
-        // 1) Try with standard VE target
         const { solution: baseSolution, lastLegal: baseLastLegal } = searchWithVe(veTarget);
 
         if (baseSolution) {
           chosen = baseSolution;
         } else if (finalStintMode === "save") {
-          // 2) Super-Save mode: try reducing VE target up to maxSavePercent
-          const maxRed = Math.max(0, Math.min(50, maxSavePercent || 0)); // clamp 0..50%
+          const maxRed = Math.max(0, Math.min(50, maxSavePercent || 0));
           let saveSolution = null;
           let bestLastLegal = baseLastLegal;
 
@@ -455,23 +595,21 @@
           if (saveSolution) {
             chosen = saveSolution;
           } else if (bestLastLegal) {
-            // 3) Even Super-Save cannot fully cover time -> extend pit time
             const missing = Math.max(0, remaining - bestLastLegal.blockF);
             const extended = { ...bestLastLegal };
             extended.pitFinal += missing;
             extended.blockF   += missing;
             chosen = extended;
-            warning = `Final stint cannot fully cover race distance at track pace within 100% VE (even with Super Save). Pit time extended by ${(missing/60).toFixed(1)} min to reach full race duration.`;
+            warning = `Final stint cannot fully cover race distance within 100% VE (even with Super Save). Pit time extended by ${(missing/60).toFixed(1)} min to reach full race duration.`;
           }
         } else {
-          // finalStintMode === "pit" - don't change VE, just extend pit if needed
           if (baseLastLegal) {
             const missing = Math.max(0, remaining - baseLastLegal.blockF);
             const extended = { ...baseLastLegal };
             extended.pitFinal += missing;
             extended.blockF   += missing;
             chosen = extended;
-            warning = `Final stint cannot fully cover race distance at track pace within 100% VE. Pit time extended by ${(missing/60).toFixed(1)} min to reach full race duration.`;
+            warning = `Final stint cannot fully cover race distance within 100% VE. Pit time extended by ${(missing/60).toFixed(1)} min to reach full race duration.`;
           }
         }
 
@@ -500,24 +638,16 @@
       };
 
       /* ------------------------------------------------------------
-         PLAN STATS (FOR SUMMARY PANEL)
+         PLAN STATS (SUMMARY PANEL)
       -------------------------------------------------------------*/
 
       const getPlanStats = (code) => {
         const { rows } = buildPlanOutline(code);
         if (!rows.length) {
           return {
-            totalLaps: 0,
-            totalVe: 0,
-            avgVELap: 0,
-            deltaVe: 0,
-            theoreticalLeft: 0,
-            totalStints: 0,
-            totalDriveSec: 0,
-            totalPitSec: 0,
-            totalTimeSec: 0,
-            maxStdLaps: 0,
-            stdLapTime: baseLapTime
+            totalLaps: 0, totalVe: 0, avgVELap: 0, deltaVe: 0, theoreticalLeft: 0,
+            totalStints: 0, totalDriveSec: 0, totalPitSec: 0, totalTimeSec: 0,
+            maxStdLaps: 0, stdLapTime: baseLapTime
           };
         }
 
@@ -546,17 +676,9 @@
         else stdLapTime = planC_lap;
 
         return {
-          totalLaps,
-          totalVe,
-          avgVELap,
-          deltaVe,
-          theoreticalLeft,
-          totalStints: rows.length,
-          totalDriveSec,
-          totalPitSec,
-          totalTimeSec,
-          maxStdLaps,
-          stdLapTime
+          totalLaps, totalVe, avgVELap, deltaVe, theoreticalLeft,
+          totalStints: rows.length, totalDriveSec, totalPitSec, totalTimeSec,
+          maxStdLaps, stdLapTime
         };
       };
 
@@ -612,13 +734,11 @@ function applyRaceplanColors() {
     unavailable: "#FF0000"
   };
 
-  // Set driver header band
   sheet.getRange(1, DRIVER_A_COL).setBackground(COLORS.driverA);
   sheet.getRange(1, DRIVER_B_COL).setBackground(COLORS.driverB);
   sheet.getRange(1, DRIVER_C_COL).setBackground(COLORS.driverC);
   sheet.getRange(1, DRIVER_D_COL).setBackground(COLORS.driverD);
 
-  // Main rows (skip header row + Quali row)
   for (let r = 3; r <= values.length; r++) {
     const row = values[r - 1];
 
@@ -626,67 +746,40 @@ function applyRaceplanColors() {
     const compound   = String(row[COMPOUND_COL    - 1] || "").toLowerCase();
     const driver     = String(row[DRIVER_COL      - 1] || "").trim();
 
-    if (tyreChange === "yes") {
-      sheet.getRange(r, TYRECHANGE_COL).setBackground(COLORS.yes);
-    } else if (tyreChange === "no") {
-      sheet.getRange(r, TYRECHANGE_COL).setBackground(COLORS.no);
-    }
+    if (tyreChange === "yes") sheet.getRange(r, TYRECHANGE_COL).setBackground(COLORS.yes);
+    else if (tyreChange === "no") sheet.getRange(r, TYRECHANGE_COL).setBackground(COLORS.no);
 
-    if (compound.includes("soft")) {
-      sheet.getRange(r, COMPOUND_COL).setBackground(COLORS.soft);
-    } else if (compound.includes("medium")) {
-      sheet.getRange(r, COMPOUND_COL).setBackground(COLORS.medium);
-    } else if (compound.includes("hard")) {
-      sheet.getRange(r, COMPOUND_COL).setBackground(COLORS.hard);
-    } else if (compound.includes("wet")) {
-      sheet.getRange(r, COMPOUND_COL).setBackground(COLORS.wet);
-    }
+    if (compound.includes("soft")) sheet.getRange(r, COMPOUND_COL).setBackground(COLORS.soft);
+    else if (compound.includes("medium")) sheet.getRange(r, COMPOUND_COL).setBackground(COLORS.medium);
+    else if (compound.includes("hard")) sheet.getRange(r, COMPOUND_COL).setBackground(COLORS.hard);
+    else if (compound.includes("wet")) sheet.getRange(r, COMPOUND_COL).setBackground(COLORS.wet);
 
     const nameA = String(values[0][DRIVER_A_COL - 1] || "").trim();
     const nameB = String(values[0][DRIVER_B_COL - 1] || "").trim();
     const nameC = String(values[0][DRIVER_C_COL - 1] || "").trim();
     const nameD = String(values[0][DRIVER_D_COL - 1] || "").trim();
 
-    if (driver && driver === nameA) {
-      sheet.getRange(r, DRIVER_A_COL).setBackground(COLORS.driverA);
-    }
-    if (driver && driver === nameB) {
-      sheet.getRange(r, DRIVER_B_COL).setBackground(COLORS.driverB);
-    }
-    if (driver && driver === nameC) {
-      sheet.getRange(r, DRIVER_C_COL).setBackground(COLORS.driverC);
-    }
-    if (driver && driver === nameD) {
-      sheet.getRange(r, DRIVER_D_COL).setBackground(COLORS.driverD);
-    }
+    if (driver && driver === nameA) sheet.getRange(r, DRIVER_A_COL).setBackground(COLORS.driverA);
+    if (driver && driver === nameB) sheet.getRange(r, DRIVER_B_COL).setBackground(COLORS.driverB);
+    if (driver && driver === nameC) sheet.getRange(r, DRIVER_C_COL).setBackground(COLORS.driverC);
+    if (driver && driver === nameD) sheet.getRange(r, DRIVER_D_COL).setBackground(COLORS.driverD);
 
-    if (row[GAME_COL - 1]) {
-      sheet.getRange(r, GAME_COL).setBackground(COLORS.gameBand);
-    }
-    if (row[UTC_COL - 1]) {
-      sheet.getRange(r, UTC_COL).setBackground(COLORS.utcBand);
-    }
+    if (row[GAME_COL - 1]) sheet.getRange(r, GAME_COL).setBackground(COLORS.gameBand);
+    if (row[UTC_COL - 1]) sheet.getRange(r, UTC_COL).setBackground(COLORS.utcBand);
   }
 
-  // Availability legend + any filled cells (no extra text rows at bottom)
   for (let r = 1; r <= values.length; r++) {
     const row = values[r - 1];
     const a = String(row[AVAIL_COL  - 1] || "").toLowerCase();
     const m = String(row[MAYBE_COL  - 1] || "").toLowerCase();
     const u = String(row[UNAVAIL_COL- 1] || "").toLowerCase();
 
-    if (a === "available" || a === "a") {
-      sheet.getRange(r, AVAIL_COL).setBackground(COLORS.available);
-    }
-    if (m === "maybe" || m === "m") {
-      sheet.getRange(r, MAYBE_COL).setBackground(COLORS.maybe);
-    }
-    if (u === "unavailable" || u === "u") {
-      sheet.getRange(r, UNAVAIL_COL).setBackground(COLORS.unavailable);
-    }
+    if (a === "available" || a === "a") sheet.getRange(r, AVAIL_COL).setBackground(COLORS.available);
+    if (m === "maybe" || m === "m") sheet.getRange(r, MAYBE_COL).setBackground(COLORS.maybe);
+    if (u === "unavailable" || u === "u") sheet.getRange(r, UNAVAIL_COL).setBackground(COLORS.unavailable);
   }
 }
-`.trim();
+      `.trim();
 
       const copyColorScriptToClipboard = () => {
         if (navigator.clipboard && window.isSecureContext) {
@@ -705,7 +798,6 @@ function applyRaceplanColors() {
 
       const { rows: outlineRows, warning: currentPlanWarning } = buildPlanOutline(plan);
 
-      // Compute start times per stint for display/export
       let gameMinForRows = timeToMin(gameStart);
       let utcMinForRows  = timeToMin(utcStart);
       const timedRows = outlineRows.map((r) => {
@@ -731,7 +823,6 @@ function applyRaceplanColors() {
           return;
         }
 
-        // Header row — confirmed
         let csv = [
           "Stint #",
           "Lap Time Target",
@@ -755,20 +846,17 @@ function applyRaceplanColors() {
           "Unavailable"
         ].join(";") + "\n";
 
-        // Quali row
         csv += "Quali;;;;;;;;;;;;;;;;;;;\n";
 
         timedRows.forEach((r) => {
           const key = `${plan}-${r.stintIndex}`;
           const driver = (driverNames[key] || "").replace(/;/g, ",");
 
-          const lapTimeTxt  = "'" + formatLap(r.lapTimeTarget); // force text
+          const lapTimeTxt  = "'" + formatLap(r.lapTimeTarget);
           const veTargetTxt = r.veTarget.toFixed(2).replace(".", ",");
           const veUsedTxt   = r.veUsed.toFixed(2).replace(".", ",");
           const pitTxt      = r.pitTime.toFixed(2).replace(".", ",");
-          const stintMin    = (
-            (r.driveSeconds + r.outPenaltySeconds) / 60
-          ).toFixed(1).replace(".", ",");
+          const stintMin    = ((r.driveSeconds + r.outPenaltySeconds) / 60).toFixed(1).replace(".", ",");
 
           const line = [
             r.label,
@@ -791,9 +879,6 @@ function applyRaceplanColors() {
           csv += line + "\n";
         });
 
-        // NOTE: removed the extra three "Available/Maybe/Unavailable" label rows
-        // at the bottom of the CSV — user did not want those.
-
         const blob = new Blob([csv], { type:"text/csv;charset=utf-8;"});
         const link = document.createElement("a");
         link.href = URL.createObjectURL(blob);
@@ -802,212 +887,213 @@ function applyRaceplanColors() {
       };
 
       /* ------------------------------------------------------------
-         UI RENDER
+         UI
       -------------------------------------------------------------*/
+
+      const planChip = (p) => {
+        if (p === "A") return { cls: "btn-lime", label: "Plan A" };
+        if (p === "B") return { cls: "btn-mag",  label: "Plan B" };
+        return { cls: "btn-cyan", label: "Plan C" };
+      };
 
       return (
         <div className="p-4 flex flex-col lg:flex-row gap-5">
 
           {/* LEFT CONTROL PANEL */}
-          <div className="w-full lg:w-1/3 space-y-6">
+          <div className="w-full lg:w-1/3 space-y-4">
 
             {/* BASE SETTINGS */}
-            <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4 space-y-4">
-              <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
-                Base Settings
+            <div className="hud-card">
+              <div className="hud-head">
+                <div className="hud-title">
+                  Base Settings
+                  <span className="hud-chip">HUD</span>
+                </div>
+                <span className="tag"><span className="dot" style={{background:"var(--lime)"}}></span>VE / Pace</span>
               </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-xs text-slate-400">Lap Time (m:ss.sss)</label>
-                  <input
-                    value={lapTimeStr}
-                    onChange={handleLapTimeChange}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-md px-2 py-1"
-                  />
-                  <div className="text-[10px] text-slate-500 mt-1">
-                    {lapTimeSec.toFixed(3)} s
+              <div className="hud-body space-y-3">
+                <div className="hud-grid cols2">
+                  <div>
+                    <div className="hud-label">Lap Time (m:ss.sss)</div>
+                    <input
+                      value={lapTimeStr}
+                      onChange={handleLapTimeChange}
+                      className="hud-input w-full"
+                    />
+                    <div className="hud-help mt-1">{lapTimeSec.toFixed(3)} s</div>
+                  </div>
+                  <div>
+                    <div className="hud-label">Race Duration (H:MM:SS)</div>
+                    <input
+                      value={raceDurationStr}
+                      onChange={handleRaceTimeChange}
+                      className="hud-input w-full"
+                    />
+                    <div className="hud-help mt-1">{(raceDurationSec/3600).toFixed(2)} h</div>
                   </div>
                 </div>
-                <div>
-                  <label className="text-xs text-slate-400">Race Duration (H:MM:SS)</label>
-                  <input
-                    value={raceDurationStr}
-                    onChange={handleRaceTimeChange}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-md px-2 py-1"
-                  />
-                  <div className="text-[10px] text-slate-500 mt-1">
-                    {(raceDurationSec/3600).toFixed(2)} h
+
+                <div className="hud-grid cols3">
+                  <div>
+                    <div className="hud-label">Tank VE (%)</div>
+                    <input
+                      type="number"
+                      value={veTotal}
+                      disabled
+                      className="hud-input w-full"
+                    />
+                  </div>
+                  <div>
+                    <div className="hud-label">Use per Lap</div>
+                    <input
+                      type="number"
+                      value={vePerLap}
+                      onChange={(e)=>setVePerLap(parseFloat(e.target.value)||0)}
+                      className="hud-input w-full"
+                    />
+                  </div>
+                  <div>
+                    <div className="hud-label">Safety Buffer</div>
+                    <input
+                      type="number"
+                      value={safetyBuffer}
+                      onChange={(e)=>setSafetyBuffer(parseFloat(e.target.value)||0)}
+                      className="hud-input w-full"
+                    />
                   </div>
                 </div>
-              </div>
 
-              <div className="grid grid-cols-3 gap-2">
                 <div>
-                  <label className="text-xs text-slate-400">Tank VE (%)</label>
+                  <div className="hud-label">Tyre Deg (s/lap/lap)</div>
                   <input
                     type="number"
-                    value={veTotal}
-                    disabled
-                    className="w-full bg-slate-700 border border-slate-600 rounded-md px-2 py-1 text-slate-300 cursor-not-allowed"
+                    step="0.001"
+                    value={tyreDeg}
+                    onChange={(e)=>setTyreDeg(parseFloat(e.target.value)||0)}
+                    className="hud-input w-full"
                   />
                 </div>
-                <div>
-                  <label className="text-xs text-slate-400">Use per Lap</label>
-                  <input
-                    type="number"
-                    value={vePerLap}
-                    onChange={(e)=>setVePerLap(parseFloat(e.target.value)||0)}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-md px-2 py-1"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-slate-400">Safety Buffer</label>
-                  <input
-                    type="number"
-                    value={safetyBuffer}
-                    onChange={(e)=>setSafetyBuffer(parseFloat(e.target.value)||0)}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-md px-2 py-1"
-                  />
-                </div>
-              </div>
 
-              <div>
-                <label className="text-xs text-slate-400">Tyre Deg (s/lap/lap)</label>
-                <input
-                  type="number"
-                  step="0.001"
-                  value={tyreDeg}
-                  onChange={(e)=>setTyreDeg(parseFloat(e.target.value)||0)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-md px-2 py-1"
-                />
+                {/* ✅ Plan B/C delta adjustability */}
+                <div className="hud-card" style={{background:"rgba(0,0,0,0.22)", boxShadow:"none", borderRadius:"14px"}}>
+                  <div className="hud-body">
+                    <div className="hud-title" style={{fontSize:"10px", marginBottom:"8px"}}>
+                      Plan Pace Deltas (s/lap)
+                    </div>
+                    <div className="hud-grid cols2">
+                      <div>
+                        <div className="hud-label">Plan B Delta</div>
+                        <input
+                          type="number"
+                          step="0.05"
+                          value={pacePenaltyB}
+                          onChange={(e)=>setPacePenaltyB(parseFloat(e.target.value)||0)}
+                          className="hud-input w-full"
+                        />
+                        <div className="hud-help mt-1">Added to base lap time for Plan B.</div>
+                      </div>
+                      <div>
+                        <div className="hud-label">Plan C Delta</div>
+                        <input
+                          type="number"
+                          step="0.05"
+                          value={pacePenaltyC}
+                          onChange={(e)=>setPacePenaltyC(parseFloat(e.target.value)||0)}
+                          className="hud-input w-full"
+                        />
+                        <div className="hud-help mt-1">Added to base lap time for Plan C.</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
               </div>
             </div>
 
             {/* COMPOUND DELTAS */}
-            <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4 space-y-3">
-              <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
-                Tyre Compound Deltas (s/lap)
+            <div className="hud-card">
+              <div className="hud-head">
+                <div className="hud-title">Tyre Compound Deltas</div>
+                <span className="tag"><span className="dot" style={{background:"var(--mag)"}}></span>s/lap</span>
               </div>
-              {["Soft","Medium","Hard","Wet"].map((c)=>(
-                <div key={c} className="flex items-center gap-2">
-                  <label className="w-20 text-xs text-slate-300">{c}</label>
-                  <input
-                    type="number"
-                    value={compoundDeltas[c]}
-                    onChange={(e)=>setCompoundDeltas({
-                      ...compoundDeltas,
-                      [c]: parseFloat(e.target.value)||0
-                    })}
-                    className="flex-1 bg-slate-800 border border-slate-700 rounded-md px-2 py-1"
-                  />
-                </div>
-              ))}
+              <div className="hud-body space-y-2">
+                {["Soft","Medium","Hard","Wet"].map((c)=>(
+                  <div key={c} className="flex items-center gap-2">
+                    <div className="hud-label w-20">{c}</div>
+                    <input
+                      type="number"
+                      step="0.05"
+                      value={compoundDeltas[c]}
+                      onChange={(e)=>setCompoundDeltas({
+                        ...compoundDeltas,
+                        [c]: parseFloat(e.target.value)||0
+                      })}
+                      className="hud-input flex-1"
+                    />
+                  </div>
+                ))}
+              </div>
             </div>
 
             {/* PIT & TIME LOSSES */}
-            <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4 space-y-3">
-              <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
-                Pit & Time Loss
+            <div className="hud-card">
+              <div className="hud-head">
+                <div className="hud-title">Pit & Time Loss</div>
+                <span className="tag"><span className="dot" style={{background:"var(--cyan)"}}></span>seconds</span>
               </div>
+              <div className="hud-body space-y-3">
+                <div className="hud-grid cols3">
+                  <div>
+                    <div className="hud-label">Base Pit (s)</div>
+                    <input type="number" value={basePit} onChange={(e)=>setBasePit(parseFloat(e.target.value)||0)} className="hud-input w-full" />
+                  </div>
+                  <div>
+                    <div className="hud-label">Tyre Change (s)</div>
+                    <input type="number" value={tyreChangeTime} onChange={(e)=>setTyreChangeTime(parseFloat(e.target.value)||0)} className="hud-input w-full" />
+                  </div>
+                  <div>
+                    <div className="hud-label">Fuel (s/%VE)</div>
+                    <input type="number" value={fuelRate} onChange={(e)=>setFuelRate(parseFloat(e.target.value)||0)} className="hud-input w-full" />
+                  </div>
+                </div>
 
-              <div className="grid grid-cols-3 gap-2">
-                <div>
-                  <label className="text-xs text-slate-400">Base Pit (s)</label>
-                  <input
-                    type="number"
-                    value={basePit}
-                    onChange={(e)=>setBasePit(parseFloat(e.target.value)||0)}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-md px-2 py-1"
-                  />
+                <div className="hud-grid cols3">
+                  <div>
+                    <div className="hud-label">In-lap Loss</div>
+                    <input type="number" value={inLapLoss} onChange={(e)=>setInLapLoss(parseFloat(e.target.value)||0)} className="hud-input w-full" />
+                  </div>
+                  <div>
+                    <div className="hud-label">Out-lap Loss</div>
+                    <input type="number" value={outLapLoss} onChange={(e)=>setOutLapLoss(parseFloat(e.target.value)||0)} className="hud-input w-full" />
+                  </div>
+                  <div>
+                    <div className="hud-label">Warmup (tyres)</div>
+                    <input type="number" value={warmupLoss} onChange={(e)=>setWarmupLoss(parseFloat(e.target.value)||0)} className="hud-input w-full" />
+                  </div>
                 </div>
-                <div>
-                  <label className="text-xs text-slate-400">Tyre Change (s)</label>
-                  <input
-                    type="number"
-                    value={tyreChangeTime}
-                    onChange={(e)=>setTyreChangeTime(parseFloat(e.target.value)||0)}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-md px-2 py-1"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-slate-400">Fuel (s/%VE)</label>
-                  <input
-                    type="number"
-                    value={fuelRate}
-                    onChange={(e)=>setFuelRate(parseFloat(e.target.value)||0)}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-md px-2 py-1"
-                  />
-                </div>
-              </div>
 
-              <div className="grid grid-cols-3 gap-2">
                 <div>
-                  <label className="text-xs text-slate-400">In-lap Loss</label>
-                  <input
-                    type="number"
-                    value={inLapLoss}
-                    onChange={(e)=>setInLapLoss(parseFloat(e.target.value)||0)}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-md px-2 py-1"
-                  />
+                  <div className="hud-label">First Lap Penalty (s)</div>
+                  <input type="number" value={firstLapPenalty} onChange={(e)=>setFirstLapPenalty(parseFloat(e.target.value)||0)} className="hud-input w-full" />
                 </div>
-                <div>
-                  <label className="text-xs text-slate-400">Out-lap Loss</label>
-                  <input
-                    type="number"
-                    value={outLapLoss}
-                    onChange={(e)=>setOutLapLoss(parseFloat(e.target.value)||0)}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-md px-2 py-1"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-slate-400">Warmup (tyres)</label>
-                  <input
-                    type="number"
-                    value={warmupLoss}
-                    onChange={(e)=>setWarmupLoss(parseFloat(e.target.value)||0)}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-md px-2 py-1"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="text-xs text-slate-400">First Lap Penalty (s)</label>
-                <input
-                  type="number"
-                  value={firstLapPenalty}
-                  onChange={(e)=>setFirstLapPenalty(parseFloat(e.target.value)||0)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-md px-2 py-1"
-                />
               </div>
             </div>
 
             {/* START TIMES */}
-            <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4 space-y-3">
-              <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
-                Session Start Times
+            <div className="hud-card">
+              <div className="hud-head">
+                <div className="hud-title">Session Start Times</div>
+                <span className="tag"><span className="dot" style={{background:"var(--lime)"}}></span>clock</span>
               </div>
-
-              <div>
-                <label className="text-xs text-slate-400">Game Start Time</label>
-                <input
-                  type="time"
-                  value={gameStart}
-                  onChange={(e)=>setGameStart(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-md px-2 py-1"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs text-slate-400">EST Start Time UTC</label>
-                <input
-                  type="time"
-                  value={utcStart}
-                  onChange={(e)=>setUtcStart(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-md px-2 py-1"
-                />
-                <div className="text-[10px] text-slate-500 mt-1">
-                  EST = Estimated Start (UTC). Adjust for official timetable.
+              <div className="hud-body space-y-3">
+                <div>
+                  <div className="hud-label">Game Start Time</div>
+                  <input type="time" value={gameStart} onChange={(e)=>setGameStart(e.target.value)} className="hud-input w-full" />
+                </div>
+                <div>
+                  <div className="hud-label">EST Start Time UTC</div>
+                  <input type="time" value={utcStart} onChange={(e)=>setUtcStart(e.target.value)} className="hud-input w-full" />
+                  <div className="hud-help mt-1">EST = Estimated Start (UTC). Adjust for official timetable.</div>
                 </div>
               </div>
             </div>
@@ -1015,326 +1101,294 @@ function applyRaceplanColors() {
           </div>
 
           {/* RIGHT MAIN PANEL */}
-          <div className="w-full lg:w-2/3 space-y-6">
+          <div className="w-full lg:w-2/3 space-y-4">
 
-            {/* PLAN SELECTOR + EXPORT */}
-            <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4 flex flex-wrap gap-3 items-center">
-              <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500 mr-3">
-                Plan
+            {/* PLAN SUMMARY */}
+            <div className="hud-card">
+              <div className="hud-head">
+                <div className="hud-title">Plan Comparison Summary</div>
+                <span className="hud-chip">A / B / C</span>
               </div>
-              {["A","B","C"].map((p)=>(
-                <button
-                  key={p}
-                  onClick={()=>setPlan(p)}
-                  className={`px-4 py-1.5 rounded-full border ${
-                    plan===p
-                      ? "bg-emerald-600 border-emerald-400 text-white"
-                      : "bg-slate-800 border-slate-600 text-slate-300"
-                  }`}
-                >
-                  {p}
-                </button>
-              ))}
-
-              <div className="ml-auto flex items-center gap-2">
-                <button
-                  onClick={exportCSV}
-                  className="px-4 py-1.5 rounded-full bg-blue-600 border border-blue-400 text-white font-semibold"
-                >
-                  Export CSV for Google Sheets
-                </button>
-              </div>
-            </div>
-
-            {/* PLAN SUMMARY PANEL (A / B / C) */}
-            <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4 text-xs">
-              <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500 mb-2">
-                Plan Comparison Summary
-              </div>
-              <table className="w-full border-collapse">
-                <thead>
-                  <tr className="text-[11px] text-slate-400 border-b border-slate-800">
-                    <th className="text-left py-1">Metric</th>
-                    <th className="text-center py-1 text-emerald-300">Plan A</th>
-                    <th className="text-center py-1 text-yellow-300">Plan B</th>
-                    <th className="text-center py-1 text-orange-300">Plan C</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr className="border-b border-slate-900">
-                    <td className="py-1">Total race laps</td>
-                    <td className="text-center">{statsA.totalLaps}</td>
-                    <td className="text-center">{statsB.totalLaps}</td>
-                    <td className="text-center">{statsC.totalLaps}</td>
-                  </tr>
-                  <tr className="border-b border-slate-900">
-                    <td className="py-1">Max standard stint laps</td>
-                    <td className="text-center">{statsA.maxStdLaps}</td>
-                    <td className="text-center">{statsB.maxStdLaps}</td>
-                    <td className="text-center">{statsC.maxStdLaps}</td>
-                  </tr>
-                  <tr className="border-b border-slate-900">
-                    <td className="py-1">Avg VE / lap (outline)</td>
-                    <td className="text-center">{statsA.avgVELap.toFixed(3)}</td>
-                    <td className="text-center">{statsB.avgVELap.toFixed(3)}</td>
-                    <td className="text-center">{statsC.avgVELap.toFixed(3)}</td>
-                  </tr>
-                  <tr className="border-b border-slate-900">
-                    <td className="py-1">Theoretical VE left (std stint)</td>
-                    <td className="text-center">{statsA.theoreticalLeft.toFixed(2)}</td>
-                    <td className="text-center">{statsB.theoreticalLeft.toFixed(2)}</td>
-                    <td className="text-center">{statsC.theoreticalLeft.toFixed(2)}</td>
-                  </tr>
-                  <tr className="border-b border-slate-900">
-                    <td className="py-1">Std stint lap time (s)</td>
-                    <td className="text-center">{statsA.stdLapTime.toFixed(3)}</td>
-                    <td className="text-center">{statsB.stdLapTime.toFixed(3)}</td>
-                    <td className="text-center">{statsC.stdLapTime.toFixed(3)}</td>
-                  </tr>
-                  <tr className="border-b border-slate-900">
-                    <td className="py-1">Total stints</td>
-                    <td className="text-center">{statsA.totalStints}</td>
-                    <td className="text-center">{statsB.totalStints}</td>
-                    <td className="text-center">{statsC.totalStints}</td>
-                  </tr>
-                  <tr className="border-b border-slate-900">
-                    <td className="py-1">Drive time (min)</td>
-                    <td className="text-center">{(statsA.totalDriveSec/60).toFixed(1)}</td>
-                    <td className="text-center">{(statsB.totalDriveSec/60).toFixed(1)}</td>
-                    <td className="text-center">{(statsC.totalDriveSec/60).toFixed(1)}</td>
-                  </tr>
-                  <tr className="border-b border-slate-900">
-                    <td className="py-1">Pit time (min)</td>
-                    <td className="text-center">{(statsA.totalPitSec/60).toFixed(1)}</td>
-                    <td className="text-center">{(statsB.totalPitSec/60).toFixed(1)}</td>
-                    <td className="text-center">{(statsC.totalPitSec/60).toFixed(1)}</td>
-                  </tr>
-                  <tr>
-                    <td className="py-1">Total time (min)</td>
-                    <td className="text-center">{(statsA.totalTimeSec/60).toFixed(1)}</td>
-                    <td className="text-center">{(statsB.totalTimeSec/60).toFixed(1)}</td>
-                    <td className="text-center">{(statsC.totalTimeSec/60).toFixed(1)}</td>
-                  </tr>
-                </tbody>
-              </table>
-              <div className="mt-2 text-[10px] text-slate-500">
-                Final stint always adjusted so the race duration is fully covered without exceeding 100% VE.
-              </div>
-            </div>
-
-            {/* FINAL STINT STRATEGY PANEL */}
-            <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4 space-y-3">
-              <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500 mb-1">
-                Final Stint Strategy
-              </div>
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <div className="space-y-2 text-xs">
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      className="accent-emerald-500"
-                      checked={finalStintMode === "pit"}
-                      onChange={()=>setFinalStintMode("pit")}
-                    />
-                    <span>Auto extend pit time if last stint can't finish within 100% VE.</span>
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      className="accent-emerald-500"
-                      checked={finalStintMode === "save"}
-                      onChange={()=>setFinalStintMode("save")}
-                    />
-                    <span>Try Super-Save VE% on last stint first, then extend pit if still needed.</span>
-                  </label>
+              <div className="hud-body">
+                <div className="overflow-x-auto">
+                  <table className="hud-table">
+                    <thead>
+                      <tr>
+                        <th className="hud-th">Metric</th>
+                        <th className="hud-th" style={{color:"rgba(124,255,91,0.9)"}}>Plan A</th>
+                        <th className="hud-th" style={{color:"rgba(255,56,209,0.9)"}}>Plan B</th>
+                        <th className="hud-th" style={{color:"rgba(54,215,255,0.9)"}}>Plan C</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[
+                        ["Total race laps", statsA.totalLaps, statsB.totalLaps, statsC.totalLaps],
+                        ["Max standard stint laps", statsA.maxStdLaps, statsB.maxStdLaps, statsC.maxStdLaps],
+                        ["Avg VE / lap (outline)", statsA.avgVELap.toFixed(3), statsB.avgVELap.toFixed(3), statsC.avgVELap.toFixed(3)],
+                        ["Theoretical VE left (std stint)", statsA.theoreticalLeft.toFixed(2), statsB.theoreticalLeft.toFixed(2), statsC.theoreticalLeft.toFixed(2)],
+                        ["Std stint lap time (s)", statsA.stdLapTime.toFixed(3), statsB.stdLapTime.toFixed(3), statsC.stdLapTime.toFixed(3)],
+                        ["Total stints", statsA.totalStints, statsB.totalStints, statsC.totalStints],
+                        ["Drive time (min)", (statsA.totalDriveSec/60).toFixed(1), (statsB.totalDriveSec/60).toFixed(1), (statsC.totalDriveSec/60).toFixed(1)],
+                        ["Pit time (min)", (statsA.totalPitSec/60).toFixed(1), (statsB.totalPitSec/60).toFixed(1), (statsC.totalPitSec/60).toFixed(1)],
+                        ["Total time (min)", (statsA.totalTimeSec/60).toFixed(1), (statsB.totalTimeSec/60).toFixed(1), (statsC.totalTimeSec/60).toFixed(1)],
+                      ].map((row, i)=>(
+                        <tr key={i}>
+                          <td className="hud-td">{row[0]}</td>
+                          <td className="hud-td">{row[1]}</td>
+                          <td className="hud-td">{row[2]}</td>
+                          <td className="hud-td">{row[3]}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-                <div className="text-xs">
-                  <label className="block text-slate-400 mb-1">
-                    Max Super-Save Reduction (%)
-                  </label>
-                  <input
-                    type="number"
-                    min={0}
-                    max={50}
-                    value={maxSavePercent}
-                    disabled={finalStintMode !== "save"}
-                    onChange={(e)=>{
-                      const v = parseFloat(e.target.value);
-                      const clamped = Math.max(0, Math.min(50, isNaN(v)?0:v));
-                      setMaxSavePercent(clamped);
-                    }}
-                    className={
-                      "w-20 bg-slate-800 border border-slate-700 rounded-md px-2 py-1 " +
-                      (finalStintMode !== "save" ? "opacity-60 cursor-not-allowed" : "")
-                    }
-                  />
-                  <div className="mt-1 text-[10px] text-slate-500">
-                    Only affects the last stint in Super-Save mode.
+                <div className="hud-help mt-2">
+                  Final stint always adjusted so the race duration is fully covered without exceeding 100% VE.
+                </div>
+              </div>
+            </div>
+
+            {/* FINAL STINT STRATEGY */}
+            <div className="hud-card">
+              <div className="hud-head">
+                <div className="hud-title">Final Stint Strategy</div>
+                <span className="tag"><span className="dot" style={{background:"var(--amber)"}}></span>last stint</span>
+              </div>
+              <div className="hud-body space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                  <div className="space-y-2 text-sm">
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        className="accent-[var(--lime)]"
+                        checked={finalStintMode === "pit"}
+                        onChange={()=>setFinalStintMode("pit")}
+                      />
+                      <span>Auto extend pit time if last stint can't finish within 100% VE.</span>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        className="accent-[var(--lime)]"
+                        checked={finalStintMode === "save"}
+                        onChange={()=>setFinalStintMode("save")}
+                      />
+                      <span>Try Super-Save VE% on last stint first, then extend pit if still needed.</span>
+                    </label>
                   </div>
+                  <div className="text-sm">
+                    <div className="hud-label mb-1">Max Super-Save Reduction (%)</div>
+                    <input
+                      type="number"
+                      min={0}
+                      max={50}
+                      value={maxSavePercent}
+                      disabled={finalStintMode !== "save"}
+                      onChange={(e)=>{
+                        const v = parseFloat(e.target.value);
+                        const clamped = Math.max(0, Math.min(50, isNaN(v)?0:v));
+                        setMaxSavePercent(clamped);
+                      }}
+                      className="hud-input w-24"
+                    />
+                    <div className="hud-help mt-1">Only affects the last stint in Super-Save mode.</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* ✅ MOVED: PLAN MENU now under Final Stint Strategy, above Stint Outline */}
+            <div className="hud-card">
+              <div className="hud-head">
+                <div className="hud-title">Plan</div>
+                <span className="hud-chip">Select + Export</span>
+              </div>
+              <div className="hud-body flex flex-wrap items-center gap-2">
+                {["A","B","C"].map((p)=>{
+                  const meta = planChip(p);
+                  return (
+                    <button
+                      key={p}
+                      onClick={()=>setPlan(p)}
+                      className={`hud-btn ${meta.cls} ${plan===p ? "active" : ""}`}
+                      title={meta.label}
+                    >
+                      {p}
+                    </button>
+                  );
+                })}
+
+                <div className="ml-auto flex items-center gap-2">
+                  <button
+                    onClick={exportCSV}
+                    className="hud-btn btn-cyan"
+                  >
+                    Export CSV
+                  </button>
                 </div>
               </div>
             </div>
 
             {/* OUTLINE TABLE */}
-            <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4">
-              <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500 mb-2">
-                Stint Outline (Plan {plan})
+            <div className="hud-card">
+              <div className="hud-head">
+                <div className="hud-title">Stint Outline</div>
+                <span className="tag"><span className="dot" style={{background:"var(--lime)"}}></span>Plan {plan}</span>
               </div>
-              <div className="overflow-x-auto">
-                <table className="min-w-max w-full text-xs border-separate border-spacing-y-1">
-                  <thead className="text-[11px] text-slate-400">
-                    <tr>
-                      <th>Stint</th>
-                      <th>Lap Target</th>
-                      <th>VE Tgt</th>
-                      <th>VE Used</th>
-                      <th>Pit</th>
-                      <th>Tyre Chg</th>
-                      <th>Compound</th>
-                      <th>Set #</th>
-                      <th>Laps</th>
-                      <th>Length (min)</th>
-                      <th>Driver</th>
-                      <th>Game Start</th>
-                      <th>UTC Start</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {timedRows.map((r)=>{
-                      const key = `${plan}-${r.stintIndex}`;
-                      const stintMins = ((r.driveSeconds + r.outPenaltySeconds)/60).toFixed(1);
-                      const isNoChange = r.stintIndex !== 1 && r.tyreChange === "No";
-                      const compoundValue = stintCompounds[key] || r.compound;
-
-                      return (
-                        <tr key={key} className="bg-slate-900/80">
-                          <td className="px-2 py-1">{r.label}</td>
-                          <td className="px-2 py-1">{formatLap(r.lapTimeTarget)}</td>
-                          <td className="px-2 py-1">{r.veTarget.toFixed(2)}</td>
-                          <td className="px-2 py-1">{r.veUsed.toFixed(2)}</td>
-                          <td className="px-2 py-1">{r.pitTime.toFixed(2)}</td>
-                          <td className="px-2 py-1">
-                            <button
-                              onClick={()=>toggleTyreChange(plan, r.stintIndex, r.tyreChange)}
-                              className={`px-2 py-0.5 rounded ${
-                                r.tyreChange==="Yes"
-                                  ? "bg-green-600"
-                                  : "bg-red-600"
-                              }`}
-                            >
-                              {r.tyreChange}
-                            </button>
-                          </td>
-                          <td className="px-2 py-1 text-white">
-                            <select
-                              value={compoundValue}
-                              disabled={isNoChange}
-                              onChange={(e)=>setStintCompound(plan,r.stintIndex,e.target.value)}
-                              className={
-                                "w-full rounded border border-slate-700 px-2 py-1 text-white " +
-                                (isNoChange
-                                  ? "bg-slate-700 cursor-not-allowed opacity-60"
-                                  : compoundColor(compoundValue))
-                              }
-                            >
-                              <option value="Soft">Soft</option>
-                              <option value="Medium">Medium</option>
-                              <option value="Hard">Hard</option>
-                              <option value="Wet">Wet</option>
-                            </select>
-                          </td>
-                          <td className="px-2 py-1">{r.tyreSet}</td>
-                          <td className="px-2 py-1">{r.laps}</td>
-                          <td className="px-2 py-1">{stintMins}</td>
-                          <td className="px-2 py-1">
-                            <input
-                              type="text"
-                              value={driverNames[key] || ""}
-                              onChange={(e)=>setStintDriver(plan,r.stintIndex,e.target.value)}
-                              className="w-24 bg-slate-800 border border-slate-700 rounded px-2 py-0.5"
-                            />
-                          </td>
-                          <td className="px-2 py-1">{r._gameStart}</td>
-                          <td className="px-2 py-1">{r._utcStart}</td>
-                        </tr>
-                      );
-                    })}
-                    {!timedRows.length && (
+              <div className="hud-body">
+                <div className="overflow-x-auto">
+                  <table className="hud-table">
+                    <thead>
                       <tr>
-                        <td colSpan={13} className="text-center text-slate-500 py-4">
-                          Enter VE, lap time and race duration to generate outline.
-                        </td>
+                        <th className="hud-th">Stint</th>
+                        <th className="hud-th">Lap Target</th>
+                        <th className="hud-th">VE Tgt</th>
+                        <th className="hud-th">VE Used</th>
+                        <th className="hud-th">Pit</th>
+                        <th className="hud-th">Tyre</th>
+                        <th className="hud-th">Compound</th>
+                        <th className="hud-th">Set</th>
+                        <th className="hud-th">Laps</th>
+                        <th className="hud-th">Len (min)</th>
+                        <th className="hud-th">Driver</th>
+                        <th className="hud-th">Game</th>
+                        <th className="hud-th">UTC</th>
                       </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-              {currentPlanWarning && (
-                <div className="mt-3 text-xs text-amber-300">
-                  ⚠ {currentPlanWarning}
+                    </thead>
+
+                    <tbody>
+                      {timedRows.map((r)=>{
+                        const key = `${plan}-${r.stintIndex}`;
+                        const stintMins = ((r.driveSeconds + r.outPenaltySeconds)/60).toFixed(1);
+                        const isNoChange = r.stintIndex !== 1 && r.tyreChange === "No";
+                        const compoundValue = stintCompounds[key] || r.compound;
+
+                        return (
+                          <tr key={key}>
+                            <td className="hud-td">{r.label}</td>
+                            <td className="hud-td">{formatLap(r.lapTimeTarget)}</td>
+                            <td className="hud-td">{r.veTarget.toFixed(2)}</td>
+                            <td className="hud-td">{r.veUsed.toFixed(2)}</td>
+                            <td className="hud-td">{r.pitTime.toFixed(2)}</td>
+                            <td className="hud-td">
+                              <button
+                                onClick={()=>toggleTyreChange(plan, r.stintIndex, r.tyreChange)}
+                                className={
+                                  "hud-btn " + (r.tyreChange==="Yes" ? "btn-lime" : "btn-mag")
+                                }
+                                style={{padding:"6px 10px", fontSize:"10px"}}
+                              >
+                                {r.tyreChange}
+                              </button>
+                            </td>
+                            <td className="hud-td">
+                              <select
+                                value={compoundValue}
+                                disabled={isNoChange}
+                                onChange={(e)=>setStintCompound(plan,r.stintIndex,e.target.value)}
+                                className={
+                                  "hud-select w-full " +
+                                  compoundClass(compoundValue) +
+                                  (isNoChange ? " opacity-60 cursor-not-allowed" : "")
+                                }
+                              >
+                                <option value="Soft">Soft</option>
+                                <option value="Medium">Medium</option>
+                                <option value="Hard">Hard</option>
+                                <option value="Wet">Wet</option>
+                              </select>
+                            </td>
+                            <td className="hud-td">{r.tyreSet}</td>
+                            <td className="hud-td">{r.laps}</td>
+                            <td className="hud-td">{stintMins}</td>
+                            <td className="hud-td">
+                              <input
+                                type="text"
+                                value={driverNames[key] || ""}
+                                onChange={(e)=>setStintDriver(plan,r.stintIndex,e.target.value)}
+                                className="hud-input w-28"
+                                placeholder="Name"
+                              />
+                            </td>
+                            <td className="hud-td">{r._gameStart}</td>
+                            <td className="hud-td">{r._utcStart}</td>
+                          </tr>
+                        );
+                      })}
+
+                      {!timedRows.length && (
+                        <tr>
+                          <td colSpan={13} className="hud-td" style={{textAlign:"center", color:"rgba(180,200,220,0.6)"}}>
+                            Enter VE, lap time and race duration to generate outline.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
                 </div>
-              )}
+
+                {currentPlanWarning && (
+                  <div className="warn mt-3">⚠ {currentPlanWarning}</div>
+                )}
+              </div>
             </div>
 
-            {/* GOOGLE SHEETS COLOR HELP PANEL */}
-            <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
-                    Google Sheets Coloring
-                  </div>
-                  <div className="text-slate-300 text-sm">
-                    Auto-color tyre changes, compounds, drivers & availability
-                  </div>
-                </div>
-
+            {/* GOOGLE SHEETS COLOR HELP */}
+            <div className="hud-card">
+              <div className="hud-head">
+                <div className="hud-title">Google Sheets Coloring</div>
                 <button
                   onClick={()=>setShowGsHelp(v=>!v)}
-                  className="px-3 py-1 rounded-full bg-slate-800 border border-slate-600 text-xs"
+                  className="hud-btn btn-mag"
+                  style={{padding:"7px 10px"}}
                 >
-                  {showGsHelp ? "Hide" : "Show"} Guide
+                  {showGsHelp ? "Hide" : "Show"}
                 </button>
               </div>
 
-              {showGsHelp && (
-                <div className="mt-4 space-y-3 text-sm">
-                  <ol className="list-decimal list-inside space-y-1 text-slate-300">
-                    <li>Click <b>Export CSV for Google Sheets</b>.</li>
-                    <li>Import CSV into a new Google Sheet (separator = <b>semicolon</b>).</li>
-                    <li>Go to <b>Extensions → Apps Script</b>.</li>
-                    <li>Delete everything and paste the script below.</li>
-                    <li>In row 1, columns N–Q, type your Driver A–D names.</li>
-                    <li>Run <code>applyRaceplanColors()</code>.</li>
-                  </ol>
-
-                  <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-slate-400 text-xs">Apps Script</span>
-                      <button
-                        onClick={copyColorScriptToClipboard}
-                        className="px-2 py-1 rounded bg-emerald-600 text-[11px] font-semibold"
-                      >
-                        Copy Script
-                      </button>
-                    </div>
-                    <textarea
-                      readOnly
-                      className="w-full h-40 bg-slate-950 border border-slate-700 rounded-md px-2 py-1 font-mono text-[10px] text-slate-200"
-                      value={googleSheetsColorScript}
-                    />
-                  </div>
+              <div className="hud-body">
+                <div className="hud-help" style={{fontSize:"12px"}}>
+                  Auto-color tyre changes, compounds, drivers & availability
                 </div>
-              )}
+
+                {showGsHelp && (
+                  <div className="mt-3 space-y-3">
+                    <ol className="list-decimal list-inside space-y-1" style={{color:"rgba(235,245,255,0.86)"}}>
+                      <li>Click <b>Export CSV</b>.</li>
+                      <li>Import CSV into a new Google Sheet (separator = <b>semicolon</b>).</li>
+                      <li>Go to <b>Extensions → Apps Script</b>.</li>
+                      <li>Delete everything and paste the script below.</li>
+                      <li>In row 1, columns N–Q, type your Driver A–D names.</li>
+                      <li>Run <code>applyRaceplanColors()</code>.</li>
+                    </ol>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="hud-label">Apps Script</span>
+                        <button
+                          onClick={copyColorScriptToClipboard}
+                          className="hud-btn btn-lime"
+                          style={{padding:"7px 10px"}}
+                        >
+                          Copy Script
+                        </button>
+                      </div>
+                      <textarea
+                        readOnly
+                        className="hud-input w-full"
+                        style={{height:"180px", fontFamily:"ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", fontSize:"11px"}}
+                        value={googleSheetsColorScript}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
           </div>
         </div>
       );
     }
-
-    /* ------------------------------------------------------------
-       RENDER APP
-    -------------------------------------------------------------*/
 
     const root = ReactDOM.createRoot(document.getElementById("root"));
     root.render(<RacePlanner />);
