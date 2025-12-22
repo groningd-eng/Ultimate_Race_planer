@@ -30,11 +30,11 @@
       --txt: rgba(235, 245, 255, 0.92);
       --muted: rgba(180, 200, 220, 0.62);
 
-      --lime: #7CFF5B;
-      --mag: #FF38D1;
-      --cyan: #36D7FF;
-      --amber: #FFC857;
-      --red: #FF3B3B;
+      --lime: #7CFF5B;   /* PUSH */
+      --mag:  #FF38D1;   /* NORMAL */
+      --cyan: #36D7FF;   /* SAVE */
+      --amber:#FFC857;
+      --red:  #FF3B3B;
 
       --shadow: 0 12px 40px rgba(0,0,0,0.65);
       --glowL: 0 0 18px rgba(124,255,91,0.22);
@@ -144,6 +144,7 @@
     .btn-lime{ border-color: rgba(124,255,91,0.45); box-shadow: var(--glowL); }
     .btn-mag { border-color: rgba(255,56,209,0.45); box-shadow: var(--glowM); }
     .btn-cyan{ border-color: rgba(54,215,255,0.45); box-shadow: var(--glowC); }
+
     .btn-lime.active{ background: rgba(124,255,91,0.14); }
     .btn-mag.active { background: rgba(255,56,209,0.14); }
     .btn-cyan.active{ background: rgba(54,215,255,0.14); }
@@ -167,10 +168,6 @@
       padding: 6px 10px;
       text-align: left;
       white-space: nowrap;
-    }
-    .hud-row{
-      background: rgba(0,0,0,0.34);
-      border: 1px solid rgba(255,255,255,0.10);
     }
     .hud-td{
       padding: 8px 10px;
@@ -200,7 +197,7 @@
     }
     .dot{ width: 8px; height: 8px; border-radius: 999px; display:inline-block; }
 
-    /* Compound "chips" (table select keeps your color logic but slightly HUD-ified) */
+    /* Compound "chips" */
     .cmp-soft{ background: rgba(255,59,59,0.20) !important; border-color: rgba(255,59,59,0.45) !important; }
     .cmp-med { background: rgba(255,200,87,0.18) !important; border-color: rgba(255,200,87,0.45) !important; }
     .cmp-hard{ background: rgba(200,210,220,0.14) !important; border-color: rgba(200,210,220,0.35) !important; }
@@ -214,6 +211,32 @@
       color: rgba(255,230,170,0.95);
     }
 
+    /* Fuel unit switch */
+    .seg{
+      display:flex;
+      border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 999px;
+      overflow:hidden;
+      background: rgba(0,0,0,0.35);
+    }
+    .seg button{
+      flex:1;
+      padding: 8px 10px;
+      font-family: Orbitron, sans-serif;
+      font-size: 11px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      border: none;
+      background: transparent;
+      color: rgba(235,245,255,0.82);
+      cursor:pointer;
+    }
+    .seg button.active{
+      background: rgba(54,215,255,0.10);
+      box-shadow: inset 0 0 0 1px rgba(54,215,255,0.20);
+      color: rgba(235,245,255,0.95);
+    }
+
     @media (max-width: 1024px){
       .hud-grid.cols3{ grid-template-columns: 1fr; }
     }
@@ -224,45 +247,62 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState } = React;
+    const { useMemo, useState } = React;
 
     function RacePlanner() {
       /* ------------------------------------------------------------
+         MODES (A/B/C) == PUSH/NORMAL/SAVE
+         - Plan A = PUSH
+         - Plan B = NORMAL
+         - Plan C = SAVE
+      -------------------------------------------------------------*/
+      const MODE = {
+        A: { key:"A", name:"PUSH",   colorVar:"--lime", btn:"btn-lime" },
+        B: { key:"B", name:"NORMAL", colorVar:"--mag",  btn:"btn-mag"  },
+        C: { key:"C", name:"SAVE",   colorVar:"--cyan", btn:"btn-cyan" },
+      };
+
+      /* ------------------------------------------------------------
          STATE / DEFAULTS
       -------------------------------------------------------------*/
+      // Fuel unit
+      const [fuelUnit, setFuelUnit] = useState("VE"); // "VE" or "L"
 
-      // Fuel & VE
-      const [veTotal] = useState(100);          // locked at 100
-      const [vePerLap, setVePerLap] = useState(4.5);
-      const [safetyBuffer, setSafetyBuffer] = useState(0.2);
+      // Tank is ALWAYS editable in liters
+      const [tankLiters, setTankLiters] = useState(100);
+
+      // Base consumption & buffer are stored in CURRENT fuelUnit
+      const [baseUsePerLap, setBaseUsePerLap] = useState(4.5); // %/lap or L/lap
+      const [fuelBuffer, setFuelBuffer] = useState(0.2);       // % or L
 
       // Lap time
       const [lapTimeStr, setLapTimeStr] = useState("4:00.000");
       const [lapTimeSec, setLapTimeSec] = useState(240);
 
-      // Race duration (24h)
+      // Race duration
       const [raceDurationStr, setRaceDurationStr] = useState("24:00:00");
       const [raceDurationSec, setRaceDurationSec] = useState(86400);
 
-      // Pits
+      // Pit model
       const [basePit, setBasePit] = useState(25);
       const [tyreChangeTime, setTyreChangeTime] = useState(13);
-      const [fuelRate, setFuelRate] = useState(0.4);     // 0.4 s / %VE
+
+      // Refuel rate is in seconds per CURRENT UNIT (%VE OR L)
+      const [refuelRate, setRefuelRate] = useState(0.4);  // s/%VE or s/L
 
       const [inLapLoss, setInLapLoss] = useState(1.5);
       const [outLapLoss, setOutLapLoss] = useState(2.0);
       const [warmupLoss, setWarmupLoss] = useState(3.0);
 
-      // Start penalties
-      const [startLoss] = useState(0);                  // removed from UI
+      // Start penalty
       const [firstLapPenalty, setFirstLapPenalty] = useState(5.0);
 
       // Tyre deg
       const [tyreDeg, setTyreDeg] = useState(0.02);
 
-      // ✅ Delta adjustability for Plan B / C (pace penalty s/lap)
-      const [pacePenaltyB, setPacePenaltyB] = useState(0.5);
-      const [pacePenaltyC, setPacePenaltyC] = useState(1.0);
+      // Pace deltas for B/C relative to A
+      const [paceDeltaB, setPaceDeltaB] = useState(0.5);
+      const [paceDeltaC, setPaceDeltaC] = useState(1.0);
 
       // Compound deltas
       const [compoundDeltas, setCompoundDeltas] = useState({
@@ -276,24 +316,30 @@
       const [gameStart, setGameStart] = useState("12:00");
       const [utcStart,  setUtcStart]  = useState("14:00");
 
-      // Active plan (A/B/C)
+      // Selected plan A/B/C
       const [plan, setPlan] = useState("A");
 
-      // Per-stint overrides
-      const [tyreChanges, setTyreChanges] = useState({});
-      const [stintCompounds, setStintCompounds] = useState({});
-      const [driverNames, setDriverNames] = useState({});
+      // Per-stint overrides (STORED PER PLAN so comparisons keep changes)
+      const [tyreChanges, setTyreChanges] = useState({});        // key: "A-3" => bool (true=change)
+      const [stintCompounds, setStintCompounds] = useState({});  // key: "A-3" => "Soft" etc (only when tyre change)
+      const [driverNames, setDriverNames] = useState({});        // key: "A-3" => "Name"
+      const [fuelSources, setFuelSources] = useState({});        // key: "A-3" => "A"|"B"|"C" (Push/Normal/Save)
 
       // Google Sheets help
       const [showGsHelp, setShowGsHelp] = useState(false);
 
-      // Final stint strategy
-      const [finalStintMode, setFinalStintMode] = useState("pit");
+      // Final stint strategy (keep as in original)
+      const [finalStintMode, setFinalStintMode] = useState("pit");  // "pit" or "save"
       const [maxSavePercent, setMaxSavePercent] = useState(2);
 
       /* ------------------------------------------------------------
-         BASIC TIME HELPERS
+         HELPERS
       -------------------------------------------------------------*/
+      const litersPerVE = Math.max(0.000001, tankLiters / 100); // liters per 1%VE
+
+      const unitLabel = fuelUnit === "VE" ? "%VE" : "L";
+      const unitPerLapLabel = fuelUnit === "VE" ? "%/lap" : "L/lap";
+      const refuelLabel = fuelUnit === "VE" ? "s/%VE" : "s/L";
 
       const parseTime = (val) => {
         if (!val) return 0;
@@ -322,10 +368,52 @@
         return `${h}:${m}`;
       };
 
+      const avgDegWithAge = (laps, deg, ageStart) => {
+        if (laps <= 0 || deg <= 0) return 0;
+        // average of ages: ageStart..ageStart+laps-1
+        return deg * (2 * ageStart + (laps - 1)) / 2;
+      };
+
+      const compoundClass = (compound) => {
+        switch (compound) {
+          case "Soft":   return "cmp-soft";
+          case "Medium": return "cmp-med";
+          case "Hard":   return "cmp-hard";
+          case "Wet":    return "cmp-wet";
+          default:       return "";
+        }
+      };
+
+      /* ------------------------------------------------------------
+         FUEL UNIT SWITCH (VE <-> L) INCLUDING REFUEL RATE
+      -------------------------------------------------------------*/
+      const switchUnit = (toUnit) => {
+        if (toUnit === fuelUnit) return;
+
+        if (fuelUnit === "VE" && toUnit === "L") {
+          // % -> L
+          const factor = litersPerVE; // L per 1%VE
+          setBaseUsePerLap((baseUsePerLap || 0) * factor);
+          setFuelBuffer((fuelBuffer || 0) * factor);
+
+          // refuel rate: s/% -> s/L  (time for 1 L = time for (1/factor)%)
+          setRefuelRate((refuelRate || 0) / factor);
+          setFuelUnit("L");
+        } else {
+          // L -> %
+          const factor = litersPerVE;
+          setBaseUsePerLap((baseUsePerLap || 0) / factor);
+          setFuelBuffer((fuelBuffer || 0) / factor);
+
+          // refuel rate: s/L -> s/%  (time for 1% = time for factor L)
+          setRefuelRate((refuelRate || 0) * factor);
+          setFuelUnit("VE");
+        }
+      };
+
       /* ------------------------------------------------------------
          INPUT HANDLERS
       -------------------------------------------------------------*/
-
       const handleLapTimeChange = (e) => {
         const v = e.target.value;
         setLapTimeStr(v);
@@ -341,160 +429,176 @@
       };
 
       /* ------------------------------------------------------------
-         PLAN DERIVATION (A / B / C)
+         DERIVE BASE MODE PROFILES (A/B/C) from baseUsePerLap + buffer
+         - They define BOTH fuel target and pace delta.
+         - Fuel per lap targets are recalculated like original:
+           compute PUSH stint laps = floor((usable)/baseUsePerLap)
+           then target = usable / laps
+           NORMAL = laps+1 target = usable/(laps+1)
+           SAVE   = laps+2 target = usable/(laps+2)
       -------------------------------------------------------------*/
-
       const baseLapTime = lapTimeSec;
-      const usableVE   = veTotal - safetyBuffer;
 
-      const avgDegWithAge = (laps, deg, ageStart) => {
-        if (laps <= 0 || deg <= 0) return 0;
-        return deg * (2 * ageStart + (laps - 1)) / 2;
+      const tankCapacityU = fuelUnit === "VE" ? 100 : tankLiters;
+      const usableFuelU = Math.max(0, tankCapacityU - (fuelBuffer || 0));
+      const baseUse = Math.max(0.000001, baseUsePerLap || 0.000001);
+
+      const pushLaps = Math.max(1, Math.floor(usableFuelU / baseUse));
+      const pushFuelTarget = usableFuelU / pushLaps;
+      const pushPaceDelta = 0;
+
+      const normalLaps = pushLaps + 1;
+      const normalFuelTarget = usableFuelU / normalLaps;
+      const normalPaceDelta = paceDeltaB;
+
+      const saveLaps = pushLaps + 2;
+      const saveFuelTarget = usableFuelU / saveLaps;
+      const savePaceDelta = paceDeltaC;
+
+      const modeConfig = (code) => {
+        if (code === "A") return { laps: pushLaps, fuelTarget: pushFuelTarget, paceDelta: pushPaceDelta };
+        if (code === "B") return { laps: normalLaps, fuelTarget: normalFuelTarget, paceDelta: normalPaceDelta };
+        return { laps: saveLaps, fuelTarget: saveFuelTarget, paceDelta: savePaceDelta };
       };
 
-      // Plan A
-      const planA_laps = Math.max(1, Math.floor(usableVE / vePerLap));
-      const planA_ve   = usableVE / planA_laps;
-      const planA_deg  = avgDegWithAge(planA_laps, tyreDeg, 0);
-      const planA_lap  = baseLapTime + planA_deg;
-
-      // Plan B
-      const planB_laps = planA_laps + 1;
-      const planB_ve   = usableVE / planB_laps;
-      const planB_deg  = avgDegWithAge(planB_laps, tyreDeg, 0);
-      const planB_lap  = baseLapTime + planB_deg + pacePenaltyB;
-
-      // Plan C
-      const planC_laps = planA_laps + 2;
-      const planC_ve   = usableVE / planC_laps;
-      const planC_deg  = avgDegWithAge(planC_laps, tyreDeg, 0);
-      const planC_lap  = baseLapTime + planC_deg + pacePenaltyC;
-
-      const getPlanConfig = (code) => {
-        if (code === "A") return { laps: planA_laps, veTarget: planA_ve, pace: 0 };
-        if (code === "B") return { laps: planB_laps, veTarget: planB_ve, pace: pacePenaltyB };
-        return { laps: planC_laps, veTarget: planC_ve, pace: pacePenaltyC };
+      const fuelOptionLabel = (code) => {
+        const cfg = modeConfig(code);
+        const name = MODE[code].name;
+        return `${name} (${cfg.fuelTarget.toFixed(2)} ${unitPerLapLabel})`;
       };
 
       /* ------------------------------------------------------------
-         PER-STINT OVERRIDES
+         PER-STINT OVERRIDES (persist per plan)
       -------------------------------------------------------------*/
+      const keyOf = (planCode, stintIndex) => `${planCode}-${stintIndex}`;
+
+      const getTyreChange = (planCode, idx) => {
+        const k = keyOf(planCode, idx);
+        const override = tyreChanges[k];
+        if (override !== undefined) return override;
+        // default: no change on stint 1, change afterwards
+        return idx === 1 ? false : true;
+      };
 
       const toggleTyreChange = (planCode, stintIndex, currentLabel) => {
-        const key = `${planCode}-${stintIndex}`;
-        setTyreChanges((prev) => ({
-          ...prev,
-          [key]: currentLabel === "Yes" ? false : true
-        }));
+        const k = keyOf(planCode, stintIndex);
+        setTyreChanges((prev) => ({ ...prev, [k]: currentLabel === "Yes" ? false : true }));
       };
 
       const setStintCompound = (planCode, stintIndex, value) => {
-        const key = `${planCode}-${stintIndex}`;
-        setStintCompounds((prev) => ({ ...prev, [key]: value }));
+        const k = keyOf(planCode, stintIndex);
+        setStintCompounds((prev) => ({ ...prev, [k]: value }));
       };
 
       const setStintDriver = (planCode, stintIndex, value) => {
-        const key = `${planCode}-${stintIndex}`;
-        setDriverNames((prev) => ({ ...prev, [key]: value }));
+        const k = keyOf(planCode, stintIndex);
+        setDriverNames((prev) => ({ ...prev, [k]: value }));
+      };
+
+      const getFuelSource = (planCode, idx) => {
+        const k = keyOf(planCode, idx);
+        // default: use the plan’s own mode
+        return fuelSources[k] || planCode;
+      };
+
+      const setFuelSource = (planCode, stintIndex, srcCode) => {
+        const k = keyOf(planCode, stintIndex);
+        setFuelSources((prev) => ({ ...prev, [k]: srcCode }));
       };
 
       /* ------------------------------------------------------------
-         COMPOUND COLOR HELPER
+         BUILD STINT OUTLINE
+         - Fuel source per stint picks BOTH: fuel target AND pace delta (tied)
+         - If tyreChange == No, compound carries over from previous stint (no manual)
+         - Final stint solver uses same fuel source logic (default = plan if not set)
       -------------------------------------------------------------*/
-
-      const compoundClass = (compound) => {
-        switch (compound) {
-          case "Soft":   return "cmp-soft";
-          case "Medium": return "cmp-med";
-          case "Hard":   return "cmp-hard";
-          case "Wet":    return "cmp-wet";
-          default:       return "";
-        }
-      };
-
-      /* ------------------------------------------------------------
-         BUILD STINT OUTLINE (ALWAYS FINISH LAST LAP)
-         returns { rows, warning } and enforces VE <= 100 on final stint.
-      -------------------------------------------------------------*/
-
       const buildPlanOutline = (planCode) => {
-        const cfg = getPlanConfig(planCode);
-        if (!cfg || !cfg.laps || cfg.laps <= 0) return { rows: [], warning: "" };
-
-        const lapsStd    = cfg.laps;
-        const veTarget   = cfg.veTarget;
-        const paceOffset = cfg.pace;
+        const stdCfg = modeConfig(planCode);
+        if (!stdCfg.laps || stdCfg.laps <= 0) return { rows: [], warning: "" };
 
         const rows = [];
-        let usedTime  = 0;
-        let stintIdx  = 1;
-        let tyreSet   = 1;
-        let tyreAge   = 0;
-        const maxStints = 200;
-        const minLap   = Math.max(1, baseLapTime);
-        const MAX_TANK = 100;
+        let usedTime = 0;
+        let stintIdx = 1;
 
+        let tyreSet = 1;
+        let tyreAge = 0;
+        let prevCompound = "Medium";
+
+        const maxStints = 200;
+        const minLap = Math.max(1, baseLapTime);
+        const MAX_TANK = tankCapacityU;
         let warning = "";
 
-        const getTyreChange = (idx) => {
-          const key = `${planCode}-${idx}`;
-          const override = tyreChanges[key];
-          if (override !== undefined) return override;
-          return idx === 1 ? false : true;
+        const getCompoundEffective = (idx, tyreChange, prev) => {
+          if (idx === 1) {
+            // first stint uses saved or default
+            const saved = stintCompounds[keyOf(planCode, idx)];
+            return saved || "Medium";
+          }
+          if (!tyreChange) {
+            // carry over if no tyre change
+            return prev;
+          }
+          const saved = stintCompounds[keyOf(planCode, idx)];
+          return saved || "Medium";
         };
 
-        const getCompound = (idx) => {
-          const key = `${planCode}-${idx}`;
-          const saved = stintCompounds[key];
-          if (saved) return saved;
-          return "Medium";
+        const stintFuelProfile = (idx) => {
+          const src = getFuelSource(planCode, idx); // "A"/"B"/"C"
+          const cfg = modeConfig(src);
+          return { src, fuelTarget: cfg.fuelTarget, paceDelta: cfg.paceDelta, lapsStd: stdCfg.laps };
         };
 
+        // regular stints (full blocks) until we can't fit another full stint
         while (stintIdx <= maxStints) {
-          const tyreChange = getTyreChange(stintIdx);
-          const compound   = getCompound(stintIdx);
+          const tyreChange = getTyreChange(planCode, stintIdx);
+          const compound = getCompoundEffective(stintIdx, tyreChange, prevCompound);
           const compoundDelta = compoundDeltas[compound] ?? 0;
 
-          let ageStart;
-          if (stintIdx === 1) ageStart = 0;
-          else ageStart = tyreChange ? 0 : tyreAge;
+          const fuelProf = stintFuelProfile(stintIdx);
 
-          const laps = lapsStd;
+          const ageStart = (stintIdx === 1) ? 0 : (tyreChange ? 0 : tyreAge);
+
+          const laps = fuelProf.lapsStd;
           const degPenalty = avgDegWithAge(laps, tyreDeg, ageStart);
-          const lapTarget  = baseLapTime + paceOffset + degPenalty + compoundDelta;
-          const veUsed     = laps * veTarget;
+          const lapTarget = baseLapTime + fuelProf.paceDelta + degPenalty + compoundDelta;
 
-          let pit   = 0;
-          let startExtra = 0;
+          const fuelUsed = laps * fuelProf.fuelTarget;
+
+          let pit = 0;
           let outLossVal = 0;
-          let inLoss  = inLapLoss;
+          let inLossVal = inLapLoss;
+          let startExtra = 0;
 
           if (stintIdx === 1) {
             pit = 0;
-            startExtra = startLoss + firstLapPenalty;
+            startExtra = firstLapPenalty;
             outLossVal = 0;
           } else {
-            const fuelTime = veUsed * fuelRate;
+            const fuelTime = fuelUsed * refuelRate; // s/(unit) * units
             pit = basePit + fuelTime + (tyreChange ? tyreChangeTime : 0);
             outLossVal = outLapLoss + (tyreChange ? warmupLoss : 0);
           }
 
           const drive = laps * lapTarget;
-          const block = pit + startExtra + outLossVal + drive + inLoss;
+          const block = pit + startExtra + outLossVal + drive + inLossVal;
 
           if (usedTime + block + minLap <= raceDurationSec) {
+            // update tyre set + tyre age
             if (stintIdx === 1) tyreSet = tyreChange ? 2 : 1;
             else if (tyreChange) tyreSet += 1;
 
             tyreAge = (stintIdx === 1 || tyreChange) ? laps : (tyreAge + laps);
+            prevCompound = compound;
 
             rows.push({
               stintIndex: stintIdx,
               label: `${stintIdx}`,
+              fuelSource: fuelProf.src, // A/B/C
+              fuelTarget: fuelProf.fuelTarget,
+              fuelUsed,
               laps,
               lapTimeTarget: lapTarget,
-              veTarget,
-              veUsed,
               pitTime: pit,
               tyreChange: tyreChange ? "Yes" : "No",
               tyreSet,
@@ -511,52 +615,56 @@
           }
         }
 
+        // final stint (solver)
         const remaining = raceDurationSec - usedTime;
+        const finalIdx = stintIdx;
 
-        const finalIdx  = stintIdx;
-        const tyreChangeFinal = getTyreChange(finalIdx);
-        const finalCompound   = getCompound(finalIdx);
-        const finalDelta      = compoundDeltas[finalCompound] ?? 0;
+        const tyreChangeFinal = getTyreChange(planCode, finalIdx);
+        const finalCompound = getCompoundEffective(finalIdx, tyreChangeFinal, prevCompound);
+        const finalDelta = compoundDeltas[finalCompound] ?? 0;
 
         let finalTyreSet = tyreSet;
         if (finalIdx === 1) finalTyreSet = tyreChangeFinal ? 2 : 1;
         else if (tyreChangeFinal) finalTyreSet += 1;
 
-        let ageStartFinal;
-        if (finalIdx === 1) ageStartFinal = 0;
-        else ageStartFinal = tyreChangeFinal ? 0 : tyreAge;
+        const ageStartFinal = (finalIdx === 1) ? 0 : (tyreChangeFinal ? 0 : tyreAge);
 
-        const maxSearch = lapsStd + 40;
+        // final stint uses the same per-stint fuel source selector logic
+        const finalFuelProf = (() => {
+          const src = getFuelSource(planCode, finalIdx);
+          const cfg = modeConfig(src);
+          return { src, fuelTarget: cfg.fuelTarget, paceDelta: cfg.paceDelta, lapsStd: stdCfg.laps };
+        })();
 
-        const searchWithVe = (vePerLapX) => {
+        const maxSearch = stdCfg.laps + 40;
+
+        const searchWithFuelPerLap = (fuelPerLapX) => {
           let solution = null;
           let lastLegal = null;
 
           for (let L = 1; L <= maxSearch; L++) {
-            const veU = L * vePerLapX;
-            if (veU > MAX_TANK) break;
+            const fuelU = L * fuelPerLapX;
+            if (fuelU > MAX_TANK) break;
 
             const degP = avgDegWithAge(L, tyreDeg, ageStartFinal);
-            const lapT = baseLapTime + paceOffset + degP + finalDelta;
+            const lapT = baseLapTime + finalFuelProf.paceDelta + degP + finalDelta;
 
-            const fuelT = veU * fuelRate;
-            const pitFinal = basePit + fuelT + (tyreChangeFinal ? tyreChangeTime : 0);
+            const fuelT = (finalIdx === 1) ? 0 : (fuelU * refuelRate);
+            const pitFinal = (finalIdx === 1)
+              ? 0
+              : (basePit + fuelT + (tyreChangeFinal ? tyreChangeTime : 0));
 
-            let startE = 0;
-            let outF = 0;
+            const startE = (finalIdx === 1) ? firstLapPenalty : 0;
+            const outF = (finalIdx === 1)
+              ? 0
+              : (outLapLoss + (tyreChangeFinal ? warmupLoss : 0));
+
             const inF = inLapLoss;
-
-            if (finalIdx === 1) {
-              startE = startLoss + firstLapPenalty;
-              outF   = 0;
-            } else {
-              outF = outLapLoss + (tyreChangeFinal ? warmupLoss : 0);
-            }
 
             const driveF = L * lapT;
             const blockF = pitFinal + startE + outF + driveF + inF;
 
-            const candidate = { L, lapT, veU, pitFinal, outF, driveF, blockF, vePerLap: vePerLapX };
+            const candidate = { L, lapT, fuelU, pitFinal, outF, driveF, blockF, fuelPerLap: fuelPerLapX };
             lastLegal = candidate;
 
             if (blockF >= Math.max(remaining, 0)) {
@@ -569,7 +677,7 @@
         };
 
         let chosen = null;
-        const { solution: baseSolution, lastLegal: baseLastLegal } = searchWithVe(veTarget);
+        const { solution: baseSolution, lastLegal: baseLastLegal } = searchWithFuelPerLap(finalFuelProf.fuelTarget);
 
         if (baseSolution) {
           chosen = baseSolution;
@@ -580,14 +688,14 @@
 
           for (let red = 1; red <= maxRed; red++) {
             const factor = 1 - red / 100;
-            const veLap = veTarget * factor;
-            const { solution, lastLegal } = searchWithVe(veLap);
+            const fuelLap = finalFuelProf.fuelTarget * factor;
+            const { solution, lastLegal } = searchWithFuelPerLap(fuelLap);
 
             if (lastLegal) bestLastLegal = lastLegal;
 
             if (solution) {
               saveSolution = solution;
-              warning = `Final stint uses Super Save: VE target reduced from ${veTarget.toFixed(2)} to ${veLap.toFixed(2)} %/lap to finish race within fuel.`;
+              warning = `Final stint uses Super Save: fuel target reduced from ${finalFuelProf.fuelTarget.toFixed(2)} to ${fuelLap.toFixed(2)} ${unitPerLapLabel} to stay within tank capacity.`;
               break;
             }
           }
@@ -600,7 +708,7 @@
             extended.pitFinal += missing;
             extended.blockF   += missing;
             chosen = extended;
-            warning = `Final stint cannot fully cover race distance within 100% VE (even with Super Save). Pit time extended by ${(missing/60).toFixed(1)} min to reach full race duration.`;
+            warning = `Final stint cannot fully cover race duration within tank capacity (even with Super Save). Pit time extended by ${(missing/60).toFixed(1)} min.`;
           }
         } else {
           if (baseLastLegal) {
@@ -609,7 +717,7 @@
             extended.pitFinal += missing;
             extended.blockF   += missing;
             chosen = extended;
-            warning = `Final stint cannot fully cover race distance within 100% VE. Pit time extended by ${(missing/60).toFixed(1)} min to reach full race duration.`;
+            warning = `Final stint cannot fully cover race duration within tank capacity. Pit time extended by ${(missing/60).toFixed(1)} min.`;
           }
         }
 
@@ -617,10 +725,11 @@
           rows.push({
             stintIndex: finalIdx,
             label: `Last (${finalIdx})`,
+            fuelSource: finalFuelProf.src,
+            fuelTarget: chosen.fuelPerLap,
+            fuelUsed: chosen.fuelU,
             laps: chosen.L,
             lapTimeTarget: chosen.lapT,
-            veTarget: chosen.vePerLap,
-            veUsed: chosen.veU,
             pitTime: chosen.pitFinal,
             tyreChange: tyreChangeFinal ? "Yes" : "No",
             tyreSet: finalTyreSet,
@@ -630,55 +739,34 @@
             outPenaltySeconds: chosen.outF
           });
         } else if (rows.length > 0) {
-          const last = rows[rows.length - 1];
-          last.label = `Last (${last.stintIndex})`;
+          rows[rows.length - 1].label = `Last (${rows[rows.length - 1].stintIndex})`;
         }
 
         return { rows, warning };
       };
 
       /* ------------------------------------------------------------
-         PLAN STATS (SUMMARY PANEL)
+         STATS FOR COMPARISON (A/B/C)
       -------------------------------------------------------------*/
-
       const getPlanStats = (code) => {
         const { rows } = buildPlanOutline(code);
         if (!rows.length) {
           return {
-            totalLaps: 0, totalVe: 0, avgVELap: 0, deltaVe: 0, theoreticalLeft: 0,
-            totalStints: 0, totalDriveSec: 0, totalPitSec: 0, totalTimeSec: 0,
-            maxStdLaps: 0, stdLapTime: baseLapTime
+            totalLaps: 0, totalFuel: 0, avgFuelLap: 0,
+            totalStints: 0, totalDriveSec: 0, totalPitSec: 0, totalTimeSec: 0
           };
         }
-
-        const cfg = getPlanConfig(code);
-
         const totalLaps = rows.reduce((s,r)=>s+r.laps,0);
-        const totalVe   = rows.reduce((s,r)=>s+r.veUsed,0);
+        const totalFuel = rows.reduce((s,r)=>s+r.fuelUsed,0);
         const totalTimeSec = rows.reduce((s,r)=>s+(r.blockSeconds||0),0);
         const totalDriveSec = rows.reduce((s,r)=>s+(r.driveSeconds||0),0);
         const totalPitSec = totalTimeSec - totalDriveSec;
-
-        const maxStdLaps = rows.reduce((max,r)=>{
-          if (String(r.label).startsWith("Last")) return max;
-          return Math.max(max, r.laps);
-        },0);
-
-        const avgVELap = totalLaps ? totalVe/totalLaps : 0;
-        const baseline = 4.5;
-        const deltaVe  = avgVELap - baseline;
-
-        const theoreticalLeft = veTotal - cfg.laps * cfg.veTarget;
-
-        let stdLapTime = baseLapTime;
-        if (code === "A") stdLapTime = planA_lap;
-        else if (code === "B") stdLapTime = planB_lap;
-        else stdLapTime = planC_lap;
+        const avgFuelLap = totalLaps ? totalFuel/totalLaps : 0;
 
         return {
-          totalLaps, totalVe, avgVELap, deltaVe, theoreticalLeft,
-          totalStints: rows.length, totalDriveSec, totalPitSec, totalTimeSec,
-          maxStdLaps, stdLapTime
+          totalLaps, totalFuel, avgFuelLap,
+          totalStints: rows.length,
+          totalDriveSec, totalPitSec, totalTimeSec
         };
       };
 
@@ -687,34 +775,69 @@
       const statsC = getPlanStats("C");
 
       /* ------------------------------------------------------------
-         GOOGLE SHEETS COLOR SCRIPT (TEXT)
+         TIMED ROWS
       -------------------------------------------------------------*/
+      const { rows: outlineRows, warning: currentPlanWarning } = buildPlanOutline(plan);
 
+      let gameMinForRows = timeToMin(gameStart);
+      let utcMinForRows  = timeToMin(utcStart);
+      const timedRows = outlineRows.map((r) => {
+        const startGame = gameMinForRows;
+        const startUtc  = utcMinForRows;
+        const blockMin  = (r.blockSeconds || 0) / 60;
+        gameMinForRows += blockMin;
+        utcMinForRows  += blockMin;
+        return {
+          ...r,
+          _gameStart: minToTime(Math.round(startGame)),
+          _utcStart:  minToTime(Math.round(startUtc))
+        };
+      });
+
+      /* ------------------------------------------------------------
+         GOOGLE SHEETS COLOR SCRIPT (UPDATED FOR NEW CSV COLUMNS)
+         Columns:
+          A Stint #
+          B Lap Time Target
+          C Fuel Target
+          D Fuel Used
+          E Pit Time (s)
+          F Tyre Change
+          G Tyre Compound
+          H Tyre Set #
+          I Laps
+          J Stint Length (min)
+          K Fuel Source (PUSH/NORMAL/SAVE)
+          L Driver
+          M Game Start
+          N UTC Start
+          O Driver A
+          P Driver B
+          Q Driver C
+          R Driver D
+          S Available
+          T Maybe
+          U Unavailable
+      -------------------------------------------------------------*/
       const googleSheetsColorScript = `
 function applyRaceplanColors() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
   const values = sheet.getDataRange().getValues();
 
-  const STINT_COL       = 1;   // A
-  const LAPTIME_COL     = 2;   // B
-  const VETARGET_COL    = 3;   // C
-  const VEUSED_COL      = 4;   // D
-  const PITTIME_COL     = 5;   // E
   const TYRECHANGE_COL  = 6;   // F
   const COMPOUND_COL    = 7;   // G
-  const TYRESET_COL     = 8;   // H
-  const LAPS_COL        = 9;   // I
-  const STINTLEN_COL    = 10;  // J
-  const DRIVER_COL      = 11;  // K
-  const GAME_COL        = 12;  // L
-  const UTC_COL         = 13;  // M
-  const DRIVER_A_COL    = 14;  // N
-  const DRIVER_B_COL    = 15;  // O
-  const DRIVER_C_COL    = 16;  // P
-  const DRIVER_D_COL    = 17;  // Q
-  const AVAIL_COL       = 18;  // R
-  const MAYBE_COL       = 19;  // S
-  const UNAVAIL_COL     = 20;  // T
+  const DRIVER_COL      = 12;  // L
+  const GAME_COL        = 13;  // M
+  const UTC_COL         = 14;  // N
+
+  const DRIVER_A_COL    = 15;  // O
+  const DRIVER_B_COL    = 16;  // P
+  const DRIVER_C_COL    = 17;  // Q
+  const DRIVER_D_COL    = 18;  // R
+
+  const AVAIL_COL       = 19;  // S
+  const MAYBE_COL       = 20;  // T
+  const UNAVAIL_COL     = 21;  // U
 
   const COLORS = {
     yes:         "#00C853",
@@ -793,49 +916,36 @@ function applyRaceplanColors() {
       };
 
       /* ------------------------------------------------------------
-         OUTLINE ROWS + TIMED ROWS
+         CSV EXPORT (UPDATED)
       -------------------------------------------------------------*/
-
-      const { rows: outlineRows, warning: currentPlanWarning } = buildPlanOutline(plan);
-
-      let gameMinForRows = timeToMin(gameStart);
-      let utcMinForRows  = timeToMin(utcStart);
-      const timedRows = outlineRows.map((r) => {
-        const startGame = gameMinForRows;
-        const startUtc  = utcMinForRows;
-        const blockMin  = (r.blockSeconds || 0) / 60;
-        gameMinForRows += blockMin;
-        utcMinForRows  += blockMin;
-        return {
-          ...r,
-          _gameStart: minToTime(Math.round(startGame)),
-          _utcStart:  minToTime(Math.round(startUtc))
-        };
-      });
-
-      /* ------------------------------------------------------------
-         CSV EXPORT FOR GOOGLE SHEETS
-      -------------------------------------------------------------*/
-
       const exportCSV = () => {
         if (!timedRows.length) {
           alert("Nothing to export — no stints generated.");
           return;
         }
 
+        const fuelTargetHeader = (fuelUnit === "VE")
+          ? "Fuel Target (%/lap)"
+          : "Fuel Target (L/lap)";
+
+        const fuelUsedHeader = (fuelUnit === "VE")
+          ? "Fuel Used (%VE)"
+          : "Fuel Used (L)";
+
         let csv = [
           "Stint #",
           "Lap Time Target",
-          "VE Target (%/lap)",
-          "VE Used (%)",
+          fuelTargetHeader,
+          fuelUsedHeader,
           "Pit Time (s)",
           "Tyre Change",
           "Tyre Compound",
           "Tyre Set #",
           "Laps",
           "Stint Length (min)",
+          "Fuel Source",
           "Driver",
-          "Game EST Start Time",
+          "Game Start Time",
           "UTC Start Time",
           "Driver A",
           "Driver B",
@@ -846,29 +956,34 @@ function applyRaceplanColors() {
           "Unavailable"
         ].join(";") + "\n";
 
-        csv += "Quali;;;;;;;;;;;;;;;;;;;\n";
+        csv += "Quali;;;;;;;;;;;;;;;;;;;;\n";
 
         timedRows.forEach((r) => {
-          const key = `${plan}-${r.stintIndex}`;
-          const driver = (driverNames[key] || "").replace(/;/g, ",");
+          const k = keyOf(plan, r.stintIndex);
+          const driver = (driverNames[k] || "").replace(/;/g, ",");
 
-          const lapTimeTxt  = "'" + formatLap(r.lapTimeTarget);
-          const veTargetTxt = r.veTarget.toFixed(2).replace(".", ",");
-          const veUsedTxt   = r.veUsed.toFixed(2).replace(".", ",");
-          const pitTxt      = r.pitTime.toFixed(2).replace(".", ",");
-          const stintMin    = ((r.driveSeconds + r.outPenaltySeconds) / 60).toFixed(1).replace(".", ",");
+          const lapTimeTxt = "'" + formatLap(r.lapTimeTarget);
+
+          const tgtTxt = r.fuelTarget.toFixed(2).replace(".", ",");
+          const usedTxt = r.fuelUsed.toFixed(2).replace(".", ",");
+
+          const pitTxt = r.pitTime.toFixed(2).replace(".", ",");
+          const stintMin = ((r.driveSeconds + r.outPenaltySeconds) / 60).toFixed(1).replace(".", ",");
+
+          const fuelSrcName = MODE[r.fuelSource].name;
 
           const line = [
             r.label,
             lapTimeTxt,
-            veTargetTxt,
-            veUsedTxt,
+            tgtTxt,
+            usedTxt,
             pitTxt,
             r.tyreChange,
             r.compound,
             r.tyreSet,
             r.laps,
             stintMin,
+            fuelSrcName,
             driver,
             r._gameStart,
             r._utcStart,
@@ -882,23 +997,21 @@ function applyRaceplanColors() {
         const blob = new Blob([csv], { type:"text/csv;charset=utf-8;"});
         const link = document.createElement("a");
         link.href = URL.createObjectURL(blob);
-        link.download = `Raceplan_${plan}_GoogleSheets.csv`;
+        link.download = `Raceplan_${MODE[plan].name}_${fuelUnit === "VE" ? "VE" : "Liters"}_GoogleSheets.csv`;
         link.click();
+      };
+
+      const planChip = (p) => {
+        if (p === "A") return { cls: "btn-lime", label: "Plan A (PUSH)" };
+        if (p === "B") return { cls: "btn-mag",  label: "Plan B (NORMAL)" };
+        return { cls: "btn-cyan", label: "Plan C (SAVE)" };
       };
 
       /* ------------------------------------------------------------
          UI
       -------------------------------------------------------------*/
-
-      const planChip = (p) => {
-        if (p === "A") return { cls: "btn-lime", label: "Plan A" };
-        if (p === "B") return { cls: "btn-mag",  label: "Plan B" };
-        return { cls: "btn-cyan", label: "Plan C" };
-      };
-
       return (
         <div className="p-4 flex flex-col lg:flex-row gap-5">
-
           {/* LEFT CONTROL PANEL */}
           <div className="w-full lg:w-1/3 space-y-4">
 
@@ -907,57 +1020,81 @@ function applyRaceplanColors() {
               <div className="hud-head">
                 <div className="hud-title">
                   Base Settings
-                  <span className="hud-chip">HUD</span>
+                  <span className="hud-chip">Fuel + Pace</span>
                 </div>
-                <span className="tag"><span className="dot" style={{background:"var(--lime)"}}></span>VE / Pace</span>
+                <span className="tag">
+                  <span className="dot" style={{background:`var(${MODE[plan].colorVar})`}}></span>
+                  {MODE[plan].name}
+                </span>
               </div>
+
               <div className="hud-body space-y-3">
+                {/* Fuel unit switch */}
+                <div>
+                  <div className="hud-label mb-2">Fuel Unit</div>
+                  <div className="seg">
+                    <button
+                      className={fuelUnit === "VE" ? "active" : ""}
+                      onClick={()=>switchUnit("VE")}
+                      title="Use VE% everywhere (fuel target, buffer, refuel rate, export)"
+                    >
+                      VE
+                    </button>
+                    <button
+                      className={fuelUnit === "L" ? "active" : ""}
+                      onClick={()=>switchUnit("L")}
+                      title="Use liters everywhere (fuel target, buffer, refuel rate, export)"
+                    >
+                      L
+                    </button>
+                  </div>
+                  <div className="hud-help mt-1">
+                    Switch converts <b>fuel usage</b>, <b>buffer</b> and <b>refuel rate</b> to keep the same real-world meaning.
+                  </div>
+                </div>
+
                 <div className="hud-grid cols2">
                   <div>
                     <div className="hud-label">Lap Time (m:ss.sss)</div>
-                    <input
-                      value={lapTimeStr}
-                      onChange={handleLapTimeChange}
-                      className="hud-input w-full"
-                    />
+                    <input value={lapTimeStr} onChange={handleLapTimeChange} className="hud-input w-full"/>
                     <div className="hud-help mt-1">{lapTimeSec.toFixed(3)} s</div>
                   </div>
                   <div>
                     <div className="hud-label">Race Duration (H:MM:SS)</div>
-                    <input
-                      value={raceDurationStr}
-                      onChange={handleRaceTimeChange}
-                      className="hud-input w-full"
-                    />
+                    <input value={raceDurationStr} onChange={handleRaceTimeChange} className="hud-input w-full"/>
                     <div className="hud-help mt-1">{(raceDurationSec/3600).toFixed(2)} h</div>
                   </div>
                 </div>
 
                 <div className="hud-grid cols3">
                   <div>
-                    <div className="hud-label">Tank VE (%)</div>
+                    <div className="hud-label">Tank Capacity (L)</div>
                     <input
-                      type="number"
-                      value={veTotal}
-                      disabled
+                      type="number" step="0.1"
+                      value={tankLiters}
+                      onChange={(e)=>setTankLiters(Math.max(0, parseFloat(e.target.value)||0))}
                       className="hud-input w-full"
                     />
+                    <div className="hud-help mt-1">Mapping: 100% VE = {tankLiters.toFixed(1)} L</div>
                   </div>
+
                   <div>
-                    <div className="hud-label">Use per Lap</div>
+                    <div className="hud-label">Base Use per Lap ({unitPerLapLabel})</div>
                     <input
-                      type="number"
-                      value={vePerLap}
-                      onChange={(e)=>setVePerLap(parseFloat(e.target.value)||0)}
+                      type="number" step="0.01"
+                      value={baseUsePerLap}
+                      onChange={(e)=>setBaseUsePerLap(parseFloat(e.target.value)||0)}
                       className="hud-input w-full"
                     />
+                    <div className="hud-help mt-1">Used to compute PUSH/NORMAL/SAVE targets.</div>
                   </div>
+
                   <div>
-                    <div className="hud-label">Safety Buffer</div>
+                    <div className="hud-label">Safety Buffer ({unitLabel})</div>
                     <input
-                      type="number"
-                      value={safetyBuffer}
-                      onChange={(e)=>setSafetyBuffer(parseFloat(e.target.value)||0)}
+                      type="number" step="0.01"
+                      value={fuelBuffer}
+                      onChange={(e)=>setFuelBuffer(parseFloat(e.target.value)||0)}
                       className="hud-input w-full"
                     />
                   </div>
@@ -966,42 +1103,38 @@ function applyRaceplanColors() {
                 <div>
                   <div className="hud-label">Tyre Deg (s/lap/lap)</div>
                   <input
-                    type="number"
-                    step="0.001"
+                    type="number" step="0.001"
                     value={tyreDeg}
                     onChange={(e)=>setTyreDeg(parseFloat(e.target.value)||0)}
                     className="hud-input w-full"
                   />
                 </div>
 
-                {/* ✅ Plan B/C delta adjustability */}
                 <div className="hud-card" style={{background:"rgba(0,0,0,0.22)", boxShadow:"none", borderRadius:"14px"}}>
                   <div className="hud-body">
                     <div className="hud-title" style={{fontSize:"10px", marginBottom:"8px"}}>
-                      Plan Pace Deltas (s/lap)
+                      Mode Pace Deltas (s/lap)
                     </div>
                     <div className="hud-grid cols2">
                       <div>
-                        <div className="hud-label">Plan B Delta</div>
+                        <div className="hud-label">NORMAL Delta</div>
                         <input
-                          type="number"
-                          step="0.05"
-                          value={pacePenaltyB}
-                          onChange={(e)=>setPacePenaltyB(parseFloat(e.target.value)||0)}
+                          type="number" step="0.05"
+                          value={paceDeltaB}
+                          onChange={(e)=>setPaceDeltaB(parseFloat(e.target.value)||0)}
                           className="hud-input w-full"
                         />
-                        <div className="hud-help mt-1">Added to base lap time for Plan B.</div>
+                        <div className="hud-help mt-1">Applied when fuel source is NORMAL.</div>
                       </div>
                       <div>
-                        <div className="hud-label">Plan C Delta</div>
+                        <div className="hud-label">SAVE Delta</div>
                         <input
-                          type="number"
-                          step="0.05"
-                          value={pacePenaltyC}
-                          onChange={(e)=>setPacePenaltyC(parseFloat(e.target.value)||0)}
+                          type="number" step="0.05"
+                          value={paceDeltaC}
+                          onChange={(e)=>setPaceDeltaC(parseFloat(e.target.value)||0)}
                           className="hud-input w-full"
                         />
-                        <div className="hud-help mt-1">Added to base lap time for Plan C.</div>
+                        <div className="hud-help mt-1">Applied when fuel source is SAVE.</div>
                       </div>
                     </div>
                   </div>
@@ -1021,17 +1154,16 @@ function applyRaceplanColors() {
                   <div key={c} className="flex items-center gap-2">
                     <div className="hud-label w-20">{c}</div>
                     <input
-                      type="number"
-                      step="0.05"
+                      type="number" step="0.05"
                       value={compoundDeltas[c]}
-                      onChange={(e)=>setCompoundDeltas({
-                        ...compoundDeltas,
-                        [c]: parseFloat(e.target.value)||0
-                      })}
+                      onChange={(e)=>setCompoundDeltas({ ...compoundDeltas, [c]: parseFloat(e.target.value)||0 })}
                       className="hud-input flex-1"
                     />
                   </div>
                 ))}
+                <div className="hud-help mt-2">
+                  If <b>No tyre change</b>, the next stint automatically carries over the previous compound.
+                </div>
               </div>
             </div>
 
@@ -1052,8 +1184,8 @@ function applyRaceplanColors() {
                     <input type="number" value={tyreChangeTime} onChange={(e)=>setTyreChangeTime(parseFloat(e.target.value)||0)} className="hud-input w-full" />
                   </div>
                   <div>
-                    <div className="hud-label">Fuel (s/%VE)</div>
-                    <input type="number" value={fuelRate} onChange={(e)=>setFuelRate(parseFloat(e.target.value)||0)} className="hud-input w-full" />
+                    <div className="hud-label">Refuel Rate ({refuelLabel})</div>
+                    <input type="number" step="0.01" value={refuelRate} onChange={(e)=>setRefuelRate(parseFloat(e.target.value)||0)} className="hud-input w-full" />
                   </div>
                 </div>
 
@@ -1103,11 +1235,11 @@ function applyRaceplanColors() {
           {/* RIGHT MAIN PANEL */}
           <div className="w-full lg:w-2/3 space-y-4">
 
-            {/* PLAN SUMMARY */}
+            {/* COMPARISON SUMMARY */}
             <div className="hud-card">
               <div className="hud-head">
-                <div className="hud-title">Plan Comparison Summary</div>
-                <span className="hud-chip">A / B / C</span>
+                <div className="hud-title">Mode Comparison Summary</div>
+                <span className="hud-chip">Push / Normal / Save</span>
               </div>
               <div className="hud-body">
                 <div className="overflow-x-auto">
@@ -1115,18 +1247,15 @@ function applyRaceplanColors() {
                     <thead>
                       <tr>
                         <th className="hud-th">Metric</th>
-                        <th className="hud-th" style={{color:"rgba(124,255,91,0.9)"}}>Plan A</th>
-                        <th className="hud-th" style={{color:"rgba(255,56,209,0.9)"}}>Plan B</th>
-                        <th className="hud-th" style={{color:"rgba(54,215,255,0.9)"}}>Plan C</th>
+                        <th className="hud-th" style={{color:"rgba(124,255,91,0.9)"}}>PUSH</th>
+                        <th className="hud-th" style={{color:"rgba(255,56,209,0.9)"}}>NORMAL</th>
+                        <th className="hud-th" style={{color:"rgba(54,215,255,0.9)"}}>SAVE</th>
                       </tr>
                     </thead>
                     <tbody>
                       {[
                         ["Total race laps", statsA.totalLaps, statsB.totalLaps, statsC.totalLaps],
-                        ["Max standard stint laps", statsA.maxStdLaps, statsB.maxStdLaps, statsC.maxStdLaps],
-                        ["Avg VE / lap (outline)", statsA.avgVELap.toFixed(3), statsB.avgVELap.toFixed(3), statsC.avgVELap.toFixed(3)],
-                        ["Theoretical VE left (std stint)", statsA.theoreticalLeft.toFixed(2), statsB.theoreticalLeft.toFixed(2), statsC.theoreticalLeft.toFixed(2)],
-                        ["Std stint lap time (s)", statsA.stdLapTime.toFixed(3), statsB.stdLapTime.toFixed(3), statsC.stdLapTime.toFixed(3)],
+                        [`Avg fuel / lap (${unitPerLapLabel})`, statsA.avgFuelLap.toFixed(3), statsB.avgFuelLap.toFixed(3), statsC.avgFuelLap.toFixed(3)],
                         ["Total stints", statsA.totalStints, statsB.totalStints, statsC.totalStints],
                         ["Drive time (min)", (statsA.totalDriveSec/60).toFixed(1), (statsB.totalDriveSec/60).toFixed(1), (statsC.totalDriveSec/60).toFixed(1)],
                         ["Pit time (min)", (statsA.totalPitSec/60).toFixed(1), (statsB.totalPitSec/60).toFixed(1), (statsC.totalPitSec/60).toFixed(1)],
@@ -1143,7 +1272,7 @@ function applyRaceplanColors() {
                   </table>
                 </div>
                 <div className="hud-help mt-2">
-                  Final stint always adjusted so the race duration is fully covered without exceeding 100% VE.
+                  Includes per-stint fuel source overrides + compound carry-over. Final stint solver is applied per plan.
                 </div>
               </div>
             </div>
@@ -1164,7 +1293,7 @@ function applyRaceplanColors() {
                         checked={finalStintMode === "pit"}
                         onChange={()=>setFinalStintMode("pit")}
                       />
-                      <span>Auto extend pit time if last stint can't finish within 100% VE.</span>
+                      <span>Auto extend pit time if last stint can't finish within tank capacity.</span>
                     </label>
                     <label className="flex items-center gap-2">
                       <input
@@ -1173,7 +1302,7 @@ function applyRaceplanColors() {
                         checked={finalStintMode === "save"}
                         onChange={()=>setFinalStintMode("save")}
                       />
-                      <span>Try Super-Save VE% on last stint first, then extend pit if still needed.</span>
+                      <span>Try Super-Save fuel target first, then extend pit if still needed.</span>
                     </label>
                   </div>
                   <div className="text-sm">
@@ -1197,7 +1326,7 @@ function applyRaceplanColors() {
               </div>
             </div>
 
-            {/* ✅ MOVED: PLAN MENU now under Final Stint Strategy, above Stint Outline */}
+            {/* PLAN MENU (like original) */}
             <div className="hud-card">
               <div className="hud-head">
                 <div className="hud-title">Plan</div>
@@ -1219,12 +1348,14 @@ function applyRaceplanColors() {
                 })}
 
                 <div className="ml-auto flex items-center gap-2">
-                  <button
-                    onClick={exportCSV}
-                    className="hud-btn btn-cyan"
-                  >
+                  <button onClick={exportCSV} className="hud-btn btn-cyan">
                     Export CSV
                   </button>
+                </div>
+              </div>
+              <div className="hud-body" style={{paddingTop:0}}>
+                <div className="hud-help">
+                  A = <b>PUSH</b>, B = <b>NORMAL</b>, C = <b>SAVE</b>. Per-stint fuel source can override the plan.
                 </div>
               </div>
             </div>
@@ -1233,7 +1364,10 @@ function applyRaceplanColors() {
             <div className="hud-card">
               <div className="hud-head">
                 <div className="hud-title">Stint Outline</div>
-                <span className="tag"><span className="dot" style={{background:"var(--lime)"}}></span>Plan {plan}</span>
+                <span className="tag">
+                  <span className="dot" style={{background:`var(${MODE[plan].colorVar})`}}></span>
+                  {MODE[plan].name}
+                </span>
               </div>
               <div className="hud-body">
                 <div className="overflow-x-auto">
@@ -1242,14 +1376,15 @@ function applyRaceplanColors() {
                       <tr>
                         <th className="hud-th">Stint</th>
                         <th className="hud-th">Lap Target</th>
-                        <th className="hud-th">VE Tgt</th>
-                        <th className="hud-th">VE Used</th>
+                        <th className="hud-th">Fuel Tgt</th>
+                        <th className="hud-th">Fuel Used</th>
                         <th className="hud-th">Pit</th>
                         <th className="hud-th">Tyre</th>
                         <th className="hud-th">Compound</th>
                         <th className="hud-th">Set</th>
                         <th className="hud-th">Laps</th>
                         <th className="hud-th">Len (min)</th>
+                        <th className="hud-th">Fuel Source</th>
                         <th className="hud-th">Driver</th>
                         <th className="hud-th">Game</th>
                         <th className="hud-th">UTC</th>
@@ -1258,39 +1393,42 @@ function applyRaceplanColors() {
 
                     <tbody>
                       {timedRows.map((r)=>{
-                        const key = `${plan}-${r.stintIndex}`;
+                        const k = keyOf(plan, r.stintIndex);
                         const stintMins = ((r.driveSeconds + r.outPenaltySeconds)/60).toFixed(1);
-                        const isNoChange = r.stintIndex !== 1 && r.tyreChange === "No";
-                        const compoundValue = stintCompounds[key] || r.compound;
+
+                        const tyreChangeLabel = r.tyreChange;
+                        const isNoChange = r.stintIndex !== 1 && tyreChangeLabel === "No";
+
+                        const compoundValue = r.compound; // already includes carry-over logic
+
+                        const fuelSrcValue = getFuelSource(plan, r.stintIndex);
 
                         return (
-                          <tr key={key}>
+                          <tr key={k}>
                             <td className="hud-td">{r.label}</td>
                             <td className="hud-td">{formatLap(r.lapTimeTarget)}</td>
-                            <td className="hud-td">{r.veTarget.toFixed(2)}</td>
-                            <td className="hud-td">{r.veUsed.toFixed(2)}</td>
+                            <td className="hud-td">{r.fuelTarget.toFixed(2)} <span style={{opacity:.7}}>{unitPerLapLabel}</span></td>
+                            <td className="hud-td">{r.fuelUsed.toFixed(2)} <span style={{opacity:.7}}>{unitLabel}</span></td>
                             <td className="hud-td">{r.pitTime.toFixed(2)}</td>
+
                             <td className="hud-td">
                               <button
                                 onClick={()=>toggleTyreChange(plan, r.stintIndex, r.tyreChange)}
-                                className={
-                                  "hud-btn " + (r.tyreChange==="Yes" ? "btn-lime" : "btn-mag")
-                                }
+                                className={"hud-btn " + (r.tyreChange==="Yes" ? "btn-lime" : "btn-mag")}
                                 style={{padding:"6px 10px", fontSize:"10px"}}
+                                title={r.tyreChange==="Yes" ? "Tyre change on this stop" : "No tyre change (compound carries over)"}
                               >
                                 {r.tyreChange}
                               </button>
                             </td>
+
                             <td className="hud-td">
                               <select
                                 value={compoundValue}
                                 disabled={isNoChange}
-                                onChange={(e)=>setStintCompound(plan,r.stintIndex,e.target.value)}
-                                className={
-                                  "hud-select w-full " +
-                                  compoundClass(compoundValue) +
-                                  (isNoChange ? " opacity-60 cursor-not-allowed" : "")
-                                }
+                                onChange={(e)=>setStintCompound(plan, r.stintIndex, e.target.value)}
+                                className={"hud-select w-full " + compoundClass(compoundValue) + (isNoChange ? " opacity-60 cursor-not-allowed" : "")}
+                                title={isNoChange ? "No tyre change → compound locked to previous stint" : "Select compound for this tyre set"}
                               >
                                 <option value="Soft">Soft</option>
                                 <option value="Medium">Medium</option>
@@ -1298,18 +1436,35 @@ function applyRaceplanColors() {
                                 <option value="Wet">Wet</option>
                               </select>
                             </td>
+
                             <td className="hud-td">{r.tyreSet}</td>
                             <td className="hud-td">{r.laps}</td>
                             <td className="hud-td">{stintMins}</td>
+
+                            {/* Fuel override dropdown (Push/Normal/Save) */}
+                            <td className="hud-td">
+                              <select
+                                value={fuelSrcValue}
+                                onChange={(e)=>setFuelSource(plan, r.stintIndex, e.target.value)}
+                                className="hud-select w-44"
+                                title="Select fuel profile for this stint (also applies the linked lap-time delta)"
+                              >
+                                <option value="A">{fuelOptionLabel("A")}</option>
+                                <option value="B">{fuelOptionLabel("B")}</option>
+                                <option value="C">{fuelOptionLabel("C")}</option>
+                              </select>
+                            </td>
+
                             <td className="hud-td">
                               <input
                                 type="text"
-                                value={driverNames[key] || ""}
-                                onChange={(e)=>setStintDriver(plan,r.stintIndex,e.target.value)}
+                                value={driverNames[k] || ""}
+                                onChange={(e)=>setStintDriver(plan, r.stintIndex, e.target.value)}
                                 className="hud-input w-28"
                                 placeholder="Name"
                               />
                             </td>
+
                             <td className="hud-td">{r._gameStart}</td>
                             <td className="hud-td">{r._utcStart}</td>
                           </tr>
@@ -1318,8 +1473,8 @@ function applyRaceplanColors() {
 
                       {!timedRows.length && (
                         <tr>
-                          <td colSpan={13} className="hud-td" style={{textAlign:"center", color:"rgba(180,200,220,0.6)"}}>
-                            Enter VE, lap time and race duration to generate outline.
+                          <td colSpan={14} className="hud-td" style={{textAlign:"center", color:"rgba(180,200,220,0.6)"}}>
+                            Enter fuel, lap time and race duration to generate outline.
                           </td>
                         </tr>
                       )}
@@ -1348,7 +1503,7 @@ function applyRaceplanColors() {
 
               <div className="hud-body">
                 <div className="hud-help" style={{fontSize:"12px"}}>
-                  Auto-color tyre changes, compounds, drivers & availability
+                  Auto-color tyre changes, compounds, drivers & availability (script matches the updated CSV columns)
                 </div>
 
                 {showGsHelp && (
@@ -1358,7 +1513,7 @@ function applyRaceplanColors() {
                       <li>Import CSV into a new Google Sheet (separator = <b>semicolon</b>).</li>
                       <li>Go to <b>Extensions → Apps Script</b>.</li>
                       <li>Delete everything and paste the script below.</li>
-                      <li>In row 1, columns N–Q, type your Driver A–D names.</li>
+                      <li>In row 1, columns O–R, type your Driver A–D names.</li>
                       <li>Run <code>applyRaceplanColors()</code>.</li>
                     </ol>
 
@@ -1376,7 +1531,7 @@ function applyRaceplanColors() {
                       <textarea
                         readOnly
                         className="hud-input w-full"
-                        style={{height:"180px", fontFamily:"ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", fontSize:"11px"}}
+                        style={{height:"200px", fontFamily:"ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", fontSize:"11px"}}
                         value={googleSheetsColorScript}
                       />
                     </div>
